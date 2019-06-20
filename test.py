@@ -82,12 +82,12 @@ class AutoEncoderTest(TimedCase):
 
     def test_compute_loss(self):
         encoder, num, bin, cat, sample = self.test_forward()
-        mse_loss, bce_loss, cce_loss = encoder.compute_loss(num, bin, cat, sample)
+        mse_loss, bce_loss, cce_loss, net_loss = encoder.compute_loss(num, bin, cat, sample)
 
     def test_train(self):
-        encoder = AutoEncoder()
+        encoder = AutoEncoder(verbose=False)
         sample = df.sample(511)
-        encoder.train(sample)
+        encoder.train(sample, epochs=2)
         return encoder
 
     def test_get_vector(self):
@@ -97,7 +97,15 @@ class AutoEncoderTest(TimedCase):
         assert z.shape[0] == 1024
         assert z.shape[1] > 1
 
-
+    def test_compute_baseline_performance(self):
+        encoder = AutoEncoder()
+        encoder.init_features(df)
+        sample = df.sample(1000)
+        in_ = EncoderDataFrame(sample).swap()
+        out_ = sample
+        in_ = encoder.prepare_df(in_)
+        out_ = encoder.prepare_df(out_)
+        baseline = encoder.compute_baseline_performance(in_, out_)
 
 class EncoderDataFrameTest(TimedCase):
 

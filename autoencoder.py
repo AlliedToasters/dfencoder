@@ -3,8 +3,22 @@ from collections import OrderedDict
 import pandas as pd
 import numpy as np
 import torch
+import tqdm
 
 from dataframe import EncoderDataFrame
+
+def ohe(input_vector, dim):
+    """Does one-hot encoding of input vector."""
+    batch_size = len(input_vector)
+    nb_digits = dim
+
+    y = input_vector.reshape(-1, 1)
+    y_onehot = torch.FloatTensor(batch_size, nb_digits)
+
+    y_onehot.zero_()
+    y_onehot.scatter_(1, y, 1)
+
+    return y_onehot
 
 def compute_embedding_size(n_categories):
     """
@@ -22,7 +36,11 @@ class AutoEncoder(torch.nn.Module):
         hidden_layers=None,
         min_cats=10,
         swap_p=.15,
+        lr=0.01,
         batch_size=256,
+        optimizer='adam',
+        activation='relu',
+        verbose=True,
         *args,
         **kwargs
             ):
@@ -43,13 +61,28 @@ class AutoEncoder(torch.nn.Module):
         self.num_names = []
         self.bin_names = []
 
-        self.activation = torch.nn.functional.relu
+        self.activation = self.interpret_activation(activation)
+        self.optimizer_name = optimizer
+        self.lr = lr
+        self.optim = None
 
         self.mse = torch.nn.modules.loss.MSELoss()
         self.bce = torch.nn.modules.loss.BCELoss()
         self.cce = torch.nn.modules.loss.CrossEntropyLoss()
 
-        self.optim = None
+        self.verbose = verbose
+
+    def interpret_activation(self, activation):
+        if activation=='relu':
+            return torch.relu
+        elif activation=='sigmoid':
+            return torch.sigmoid
+        elif activation=='tanh':
+            return torch.tanh
+        else:
+            msg = f'activation {activation} not understood. \n'
+            msg += 'please use one of: \n'
+            msg += "'relu', 'sigmoid', 'tanh'"
 
     def init_numeric(self, df):
         dt = df.dtypes
@@ -206,7 +239,7 @@ class AutoEncoder(torch.nn.Module):
             feature = self.categorical_fts[ft]
             emb = feature['embedding'](codes[i])
             embeddings.append(emb)
-        return num, bin, embeddings
+        return [num], [bin], embeddings
 
     def compute_outputs(self, x):
         num = self.numeric_output(x)
@@ -222,7 +255,7 @@ class AutoEncoder(torch.nn.Module):
     def forward(self, df):
         """We do the thang. Takes pandas dataframe as input."""
         num, bin, embeddings = self.encode_input(df)
-        x = torch.cat([num, bin] + embeddings, dim=1)
+        x = torch.cat(num + bin + embeddings, dim=1)
         for i, layer in enumerate(self.layers):
             x = layer(x)
             if i != len(self.layers) - 1:
@@ -231,16 +264,21 @@ class AutoEncoder(torch.nn.Module):
         return num, bin, cat
 
     def compute_loss(self, num, bin, cat, target_df):
+        net_loss = 0
         num_target, bin_target, codes = self.compute_targets(target_df)
         mse_loss = self.mse(num, num_target)
+        net_loss += mse_loss.item()
         bce_loss = self.bce(bin, bin_target)
+        net_loss += bce_loss.item()
         cce_loss = []
         for i, ft in enumerate(self.categorical_fts):
             loss = self.cce(cat[i], codes[i])
             cce_loss.append(loss)
-        return mse_loss, bce_loss, cce_loss
+            net_loss += loss.item()
+        return mse_loss, bce_loss, cce_loss, net_loss
 
     def do_backward(self, mse, bce, cce):
+
         mse.backward(retain_graph=True)
         bce.backward(retain_graph=True)
         for i, ls in enumerate(cce):
@@ -249,30 +287,83 @@ class AutoEncoder(torch.nn.Module):
             else:
                 ls.backward(retain_graph=True)
 
-    def train(self, df, epochs=1):
+    def compute_baseline_performance(self, in_, out_):
+        """
+        Baseline performance is computed by generating a strong
+            prediction for the identity function (predicting input==output)
+            with a swapped (noisy) input,
+            and computing the loss against the unaltered original data.
+
+        This should be roughly the loss we expect when the encoder degenerates
+            into the identity function solution.
+
+        Returns net loss on baseline performance computation
+            (sum of all losses)
+        """
+        num_pred, bin_pred, codes = self.compute_targets(in_)
+        bin_pred += ((bin_pred == 0).float() * 0.05)
+        bin_pred -= ((bin_pred == 1).float() * 0.05)
+        codes_pred = []
+        for i, cd in enumerate(codes):
+            feature = list(self.categorical_fts.items())[i][1]
+            dim = len(feature['cats']) + 1
+            pred = ohe(cd, dim) * 5
+            codes_pred.append(pred)
+        mse_loss, bce_loss, cce_loss, net_loss = self.compute_loss(num_pred, bin_pred, codes_pred, out_)
+        return net_loss
+
+    def train(self, df, epochs=1, val=None):
         """Does training."""
         if self.optim is None:
             df = self.build_model(df)
         else:
             df = self.prepare_df(df)
+
+        if val is not None:
+            val_df = self.prepare_df(val)
+            val_in = val_df.swap(likelihood=self.swap_p)
+            msg = "Validating during training.\n"
+            msg += "Computing baseline performance..."
+            baseline = self.compute_baseline_performance(val_in, val_df)
+
         n_updates = len(df)//self.batch_size
         if len(df) % self.batch_size > 0:
             n_updates += 1
         for i in range(epochs):
-            print(f'training epoch {i}...')
+            if self.verbose:
+                print(f'training epoch {i+1}...')
             df = df.sample(frac=1.0)
             df = EncoderDataFrame(df)
             input_df = df.swap(likelihood=self.swap_p)
-            for j in range(n_updates):
+            for j in tqdm.trange(n_updates, disable=not self.verbose):
                 start = j * self.batch_size
                 stop = (j+1) * self.batch_size
                 in_sample = input_df.iloc[start:stop]
                 target_sample = df.iloc[start:stop]
                 num, bin, cat = self.forward(in_sample)
-                mse, bce, cce = self.compute_loss(num, bin, cat, target_sample)
+                mse, bce, cce, net_loss = self.compute_loss(num, bin, cat, target_sample)
                 self.do_backward(mse, bce, cce)
                 self.optim.step()
                 self.optim.zero_grad()
+
+            if val is not None:
+                with torch.no_grad():
+                    msg = ''
+                    num, bin, cat = self.forward(val_in)
+                    _, _, _, net_loss = self.compute_loss(num, bin, cat, val_df)
+                    msg += 'net validation loss, swapped input: \n'
+                    msg += f"{round(net_loss, 4)} \n\n"
+
+                    msg += 'baseline validation loss: '
+                    msg += f"{round(baseline, 4)} \n\n"
+
+                    num, bin, cat = self.forward(val_df)
+                    _, _, _, net_loss = self.compute_loss(num, bin, cat, val_df)
+                    msg += 'net validation loss, unaltered input: \n'
+                    msg += f"{round(net_loss, 4)} \n\n\n"
+
+                    if self.verbose:
+                        print(msg)
 
     def get_vector(self, df, layer=-1):
         """
@@ -284,7 +375,7 @@ class AutoEncoder(torch.nn.Module):
         else:
             df = self.prepare_df(df)
         num, bin, embeddings = self.encode_input(df)
-        x = torch.cat([num, bin] + embeddings, dim=1)
+        x = torch.cat(num + bin + embeddings, dim=1)
         if layer == -1:
             layer = len(self.layers)
         for i in range(layer):
