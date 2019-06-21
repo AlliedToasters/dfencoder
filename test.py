@@ -1,9 +1,12 @@
 import unittest
 import time
+
 import pandas as pd
 import numpy as np
-from dataframe import EncoderDataFrame
-from autoencoder import AutoEncoder, compute_embedding_size
+import torch
+
+from dfencoder import EncoderDataFrame
+from dfencoder import AutoEncoder, compute_embedding_size, CompleteLayer
 
 class TimedCase(unittest.TestCase):
 
@@ -13,6 +16,19 @@ class TimedCase(unittest.TestCase):
     def tearDown(self):
         t = time.time() - self.startTime
         print("%s: %.3f seconds" % (self.id(), t))
+
+class TestCompleteLayer(TimedCase):
+    def test_init(self):
+        layer = CompleteLayer(12, 5, activation=torch.sigmoid, dropout=.2)
+        assert len(layer.layers) == 3
+        return layer
+
+    def test_forward(self):
+        layer = self.test_init()
+        x = torch.randn((34, 12))
+        out = layer(x)
+        assert out.shape == (34, 5)
+        assert (out == 0).any().any()
 
 class AutoEncoderTest(TimedCase):
 
@@ -60,10 +76,29 @@ class AutoEncoderTest(TimedCase):
         }
         encoder.build_inputs()
 
-    def test_build_model(self):
-        encoder = AutoEncoder(hidden_layers=[128, 128])
+    def test_build_vanilla_model(self):
+        encoder = AutoEncoder()
         out_df = encoder.build_model(df)
         assert not out_df.isna().any().any()
+
+    def test_build_model(self):
+
+        encoder = AutoEncoder(
+            encoder_layers=[32, 32],
+            decoder_layers=[32, 32],
+            encoder_dropout=.5,
+            decoder_dropout=[.2, None],
+            activation='tanh',
+            swap_p=.2,
+            batch_size=123,
+            optimizer='sgd'
+        )
+        out_df = encoder.build_model(df)
+        assert not out_df.isna().any().any()
+        layers_count = 0
+        for prm in encoder.parameters():
+            layers_count += 1
+        assert layers_count == 33
         return encoder, out_df
 
     def test_encode_input(self):
@@ -84,16 +119,22 @@ class AutoEncoderTest(TimedCase):
         encoder, num, bin, cat, sample = self.test_forward()
         mse_loss, bce_loss, cce_loss, net_loss = encoder.compute_loss(num, bin, cat, sample)
 
-    def test_train(self):
+    def test_fit(self):
         encoder = AutoEncoder(verbose=False)
         sample = df.sample(511)
-        encoder.train(sample, epochs=2)
+        encoder.fit(sample, epochs=2)
+        anomaly_score = encoder.get_anomaly_score(sample)
+        assert anomaly_score.shape == (511,)
+        encoder.fit(sample, epochs=2)
+        data = encoder.df_predict(sample)
+        assert (data.columns == sample.columns).all()
+        assert data.shape == sample.shape
         return encoder
 
-    def test_get_vector(self):
+    def test_get_representation(self):
         encoder = AutoEncoder()
         sample = df.sample(1024)
-        z = encoder.get_vector(sample)
+        z = encoder.get_representation(sample)
         assert z.shape[0] == 1024
         assert z.shape[1] > 1
 
