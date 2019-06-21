@@ -12,7 +12,7 @@ reqs= [
     'pandas',
     'tqdm'
 ]
-version = '0.0.1'
+version = '0.0.11'
 
 setup(
     name='dfencoder',

@@ -7,13 +7,13 @@ import tqdm
 
 from .dataframe import EncoderDataFrame
 
-def ohe(input_vector, dim):
+def ohe(input_vector, dim, device="cpu"):
     """Does one-hot encoding of input vector."""
     batch_size = len(input_vector)
     nb_digits = dim
 
     y = input_vector.reshape(-1, 1)
-    y_onehot = torch.FloatTensor(batch_size, nb_digits)
+    y_onehot = torch.FloatTensor(batch_size, nb_digits).to(device)
 
     y_onehot.zero_()
     y_onehot.scatter_(1, y, 1)
@@ -443,7 +443,7 @@ class AutoEncoder(torch.nn.Module):
         for i, cd in enumerate(codes):
             feature = list(self.categorical_fts.items())[i][1]
             dim = len(feature['cats']) + 1
-            pred = ohe(cd, dim) * 5
+            pred = ohe(cd, dim, device=self.device) * 5
             codes_pred.append(pred)
         mse_loss, bce_loss, cce_loss, net_loss = self.compute_loss(num_pred, bin_pred, codes_pred, out_)
         return net_loss
