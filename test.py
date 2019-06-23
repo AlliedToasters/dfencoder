@@ -7,6 +7,7 @@ import torch
 
 from dfencoder import EncoderDataFrame
 from dfencoder import AutoEncoder, compute_embedding_size, CompleteLayer
+from dfencoder import BasicLogger, IpynbLogger
 
 class TimedCase(unittest.TestCase):
 
@@ -91,7 +92,8 @@ class AutoEncoderTest(TimedCase):
             activation='tanh',
             swap_p=.2,
             batch_size=123,
-            optimizer='sgd'
+            optimizer='sgd',
+            lr_decay=.95
         )
         out_df = encoder.build_model(df)
         assert not out_df.isna().any().any()
@@ -120,9 +122,16 @@ class AutoEncoderTest(TimedCase):
         mse_loss, bce_loss, cce_loss, net_loss = encoder.compute_loss(num, bin, cat, sample)
 
     def test_fit(self):
-        encoder = AutoEncoder(verbose=False)
+        encoder = AutoEncoder(
+            verbose=False,
+            optimizer='sgd',
+            lr=.01,
+            lr_decay=.95,
+            progress_bar=False
+        )
         sample = df.sample(511)
         encoder.fit(sample, epochs=2)
+        assert encoder.lr_decay.get_lr()[0] < .01
         anomaly_score = encoder.get_anomaly_score(sample)
         assert anomaly_score.shape == (511,)
         encoder.fit(sample, epochs=2)
@@ -161,6 +170,30 @@ class EncoderDataFrameTest(TimedCase):
         assert (scr == ef).any().all()
         assert (scr != ef).any().all()
         assert not (scr == ef).all().all()
+
+class LoggerTest(TimedCase):
+
+    def test_basic_logger(self):
+        logger = BasicLogger(fts=['ft1', 'ft2', 'ft3'])
+        self.run_logging_test(logger)
+
+    def run_logging_test(self, logger):
+        assert len(logger.train_fts) == 3
+        assert len(logger.val_fts) == 3
+        logger.training_step([0.2, 0.3, 0.2])
+        logger.training_step([0.1, 0.1, -0.2])
+        logger.end_epoch(val_losses=[0.1, 0.1, 0.1])
+        assert logger.train_fts['ft3'][1] == [0]
+        assert logger.val_fts['ft3'] == [0.1]
+        assert logger.n_epochs == 1
+
+    def test_ipynb_logger(self):
+        logger = IpynbLogger(fts=['ft1', 'ft2', 'ft3'], baseline_loss=0.2)
+        self.run_logging_test(logger)
+        logger.training_step([0.2, 0.3, 0.2])
+        logger.training_step([0.1, 0.1, -0.2])
+        logger.training_step([0.3, 0.0, 0.3])
+        logger.end_epoch(val_losses=[0.05, 0.0, 0.1])
 
 if __name__ == '__main__':
     df = pd.read_csv('adult.csv')
