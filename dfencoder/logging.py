@@ -63,7 +63,6 @@ class IpynbLogger(BasicLogger):
             val_loss = np.array(val_loss).mean(axis=0)
             self.plt.plot(x, val_loss, label='val loss', color='blue')
         self.plt.ylim(0, math.ceil(2*self.baseline_loss))
-        self.plt.xticks(x, x)
         self.plt.legend()
         self.plt.xlabel('epochs')
         self.plt.ylabel('loss')
