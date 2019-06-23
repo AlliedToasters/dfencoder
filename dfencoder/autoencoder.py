@@ -84,7 +84,7 @@ class AutoEncoder(torch.nn.Module):
             weight_decay=0,
             lr_decay=None,
             nesterov=False,
-            verbose=True,
+            verbose=False,
             device=None,
             logger='basic',
             progress_bar=True,
@@ -296,6 +296,9 @@ class AutoEncoder(torch.nn.Module):
 
         Returns the dataframe after making changes.
         """
+        if self.verbose:
+            print('Building model...')
+
         #get metadata from features
         self.init_features(df)
         input_dim = self.build_inputs()
@@ -305,7 +308,7 @@ class AutoEncoder(torch.nn.Module):
             self.encoder_layers = [int(np.sqrt(2)*input_dim) for _ in range(2)]
 
         if self.decoder_layers is None:
-            self.decoder_layers = [int(np.sqrt(2)*input_dim) for _ in range(2)]
+            self.decoder_layers = []
 
         if self.encoder_dropout is None or type(self.encoder_dropout) == float:
             drp = self.encoder_dropout
@@ -361,6 +364,9 @@ class AutoEncoder(torch.nn.Module):
             self.logger = IpynbLogger(fts=fts)
         #returns a copy of preprocessed dataframe.
         self.to(self.device)
+
+        if self.verbose:
+            print('done!')
         return self.prepare_df(df)
 
     def compute_targets(self, df):
@@ -428,35 +434,30 @@ class AutoEncoder(torch.nn.Module):
         if logging:
             if self.logger is not None:
                 logging = True
-                for_logger = []
             else:
                 logging = False
-        net_loss = 0
+        net_loss = []
         num_target, bin_target, codes = self.compute_targets(target_df)
         mse_loss = self.mse(num, num_target)
-        if logging:
-            for_logger += list(mse_loss.mean(dim=0).cpu().detach().numpy())
+        net_loss += list(mse_loss.mean(dim=0).cpu().detach().numpy())
         mse_loss = mse_loss.mean()
-        net_loss += mse_loss.cpu().item()
         bce_loss = self.bce(bin, bin_target)
-        if logging:
-            for_logger += list(bce_loss.mean(dim=0).cpu().detach().numpy())
+        net_loss += list(bce_loss.mean(dim=0).cpu().detach().numpy())
         bce_loss = bce_loss.mean()
-        net_loss += bce_loss.cpu().item()
         cce_loss = []
         for i, ft in enumerate(self.categorical_fts):
             loss = self.cce(cat[i], codes[i])
             loss = loss.mean()
             cce_loss.append(loss)
             val = loss.cpu().item()
-            net_loss += val
-            if logging:
-                for_logger += [val]
+            net_loss += [val]
         if logging:
             if self.training:
-                self.logger.training_step(for_logger)
+                self.logger.training_step(net_loss)
             elif not self.training:
-                self.logger.end_epoch(for_logger)
+                self.logger.end_epoch(net_loss)
+
+        net_loss = np.array(net_loss).mean()
         return mse_loss, bce_loss, cce_loss, net_loss
 
     def do_backward(self, mse, bce, cce):

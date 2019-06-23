@@ -50,7 +50,7 @@ class IpynbLogger(BasicLogger):
         self.clear_output()
         x = list(range(1, self.n_epochs+1))
         train_loss = [self.train_fts[ft][1] for ft in self.fts]
-        train_loss = np.array(train_loss).sum(axis=0)
+        train_loss = np.array(train_loss).mean(axis=0)
         self.plt.plot(x, train_loss, label='train loss', color='orange')
         if len(self.val_fts[self.fts[0]]) > 0:
             self.plt.axhline(
@@ -60,7 +60,7 @@ class IpynbLogger(BasicLogger):
                 color='blue'
             )
             val_loss = [self.val_fts[ft] for ft in self.fts]
-            val_loss = np.array(val_loss).sum(axis=0)
+            val_loss = np.array(val_loss).mean(axis=0)
             self.plt.plot(x, val_loss, label='val loss', color='blue')
         self.plt.ylim(0, math.ceil(2*self.baseline_loss))
         self.plt.xticks(x, x)
