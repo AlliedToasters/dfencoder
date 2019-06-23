@@ -10,7 +10,8 @@ reqs= [
     'torch',
     'numpy',
     'pandas',
-    'tqdm'
+    'tqdm',
+    'scikit-learn'
 ]
 version = '0.0.11'
 
