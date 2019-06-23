@@ -7,6 +7,7 @@ import tqdm
 
 from .dataframe import EncoderDataFrame
 from .logging import BasicLogger, IpynbLogger
+from .scalers import StandardScaler, NullScaler, GaussRankScaler
 
 def ohe(input_vector, dim, device="cpu"):
     """Does one-hot encoding of input vector."""
@@ -87,6 +88,7 @@ class AutoEncoder(torch.nn.Module):
             device=None,
             logger='basic',
             progress_bar=True,
+            scaler='standard',
             *args,
             **kwargs
         ):
@@ -137,6 +139,12 @@ class AutoEncoder(torch.nn.Module):
             self.device = device
 
         self.logger = logger
+        if scaler == 'standard':
+            self.Scaler = StandardScaler
+        elif scaler == 'gauss_rank':
+            self.Scaler = GaussRankScaler
+        elif scaler is None:
+            self.Scaler = NullScaler
 
     def interpret_activation(self):
         activation = self.activation
@@ -160,8 +168,10 @@ class AutoEncoder(torch.nn.Module):
         for ft in numeric:
             feature = {
                 'mean':df[ft].mean(),
-                'std':df[ft].std()
+                'std':df[ft].std(),
+                'scaler':self.Scaler()
             }
+            feature['scaler'].fit(df[ft][~df[ft].isna()].values)
             self.numeric_fts[ft] = feature
 
         self.num_names = list(self.numeric_fts.keys())
@@ -242,9 +252,9 @@ class AutoEncoder(torch.nn.Module):
         for ft in self.numeric_fts:
             feature = self.numeric_fts[ft]
             col = df[ft].fillna(feature['mean'])
-            col -= feature['mean']
-            col /= feature['std']
-            output_df[ft] = col
+            trans_col = feature['scaler'].transform(col.values)
+            trans_col = pd.Series(index=df.index, data=trans_col)
+            output_df[ft] = trans_col
 
         for ft in self.binary_fts:
             feature = self.binary_fts[ft]
@@ -624,8 +634,10 @@ class AutoEncoder(torch.nn.Module):
         num_df.columns = num_cols
         for ft in num_df.columns:
             feature = self.numeric_fts[ft]
-            num_df[ft] *= feature['std']
-            num_df[ft] += feature['mean']
+            col = num_df[ft]
+            trans_col = feature['scaler'].inverse_transform(col.values)
+            result = pd.Series(index=df.index, data=trans_col)
+            num_df[ft] = result
 
         bin_cols = [x for x in self.binary_fts.keys()]
         bin_df = pd.DataFrame(data=bin.cpu().numpy(), index=df.index)

@@ -8,6 +8,7 @@ import torch
 from dfencoder import EncoderDataFrame
 from dfencoder import AutoEncoder, compute_embedding_size, CompleteLayer
 from dfencoder import BasicLogger, IpynbLogger
+from dfencoder import StandardScaler, NullScaler, GaussRankScaler
 
 class TimedCase(unittest.TestCase):
 
@@ -127,7 +128,8 @@ class AutoEncoderTest(TimedCase):
             optimizer='sgd',
             lr=.01,
             lr_decay=.95,
-            progress_bar=False
+            progress_bar=False,
+            scaler='gauss_rank'
         )
         sample = df.sample(511)
         encoder.fit(sample, epochs=2)
@@ -193,7 +195,35 @@ class LoggerTest(TimedCase):
         logger.training_step([0.2, 0.3, 0.2])
         logger.training_step([0.1, 0.1, -0.2])
         logger.training_step([0.3, 0.0, 0.3])
-        logger.end_epoch(val_losses=[0.05, 0.0, 0.1])
+        #logger.end_epoch(val_losses=[0.05, 0.0, 0.1])
+
+class ScalerTest(TimedCase):
+
+    def test_standard_scaler(self):
+        scaler = StandardScaler()
+        x = np.random.randn(100)
+        x *= 3
+        x -= 3
+        x_ = scaler.fit_transform(x)
+        assert np.abs(x_.mean()) < 0.01
+        assert .99 < x_.std() < 1.01
+
+    def test_null_scaler(self):
+        scaler=NullScaler()
+        x = np.random.randn(100)
+        x *= 3
+        x -= 3
+        x_ = scaler.fit_transform(x)
+        assert (x_ == x).all()
+
+    def test_gauss_rank_scaler(self):
+        scaler = GaussRankScaler()
+        x = np.random.randn(10000)
+        x *= 3
+        x -= 3
+        x_ = scaler.fit_transform(x)
+        assert np.abs(x_.mean()) < 0.01
+        assert .99 < x_.std() < 1.01
 
 if __name__ == '__main__':
     df = pd.read_csv('adult.csv')
