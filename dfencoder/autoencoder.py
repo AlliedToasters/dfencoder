@@ -119,6 +119,7 @@ class AutoEncoder(torch.nn.Module):
             logger='basic',
             progress_bar=True,
             save_memory=False,
+            n_megabatches=10,
             scaler='standard',
             *args,
             **kwargs
@@ -176,6 +177,7 @@ class AutoEncoder(torch.nn.Module):
         self.scaler = scaler
 
         self.save_memory = save_memory
+        self.n_megabatches = n_megabatches
 
     def get_scaler(self, name):
         scalers = {
@@ -656,7 +658,7 @@ class AutoEncoder(torch.nn.Module):
             pbar = None
 
         n_rows = len(df)
-        n_megabatches = 10
+        n_megabatches = self.n_megabatches
         batch_size = self.batch_size
         res = n_rows/n_megabatches
         batches_per_megabatch = (res // batch_size) + 1
