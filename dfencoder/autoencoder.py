@@ -76,6 +76,7 @@ class AutoEncoder(torch.nn.Module):
             swap_p=.15,
             lr=0.01,
             batch_size=256,
+            eval_batch_size=1024,
             optimizer='adam',
             amsgrad=False,
             momentum=0,
@@ -107,6 +108,7 @@ class AutoEncoder(torch.nn.Module):
 
         self.swap_p = swap_p
         self.batch_size = batch_size
+        self.eval_batch_size = eval_batch_size
 
         self.numeric_output = None
         self.binary_output = None
@@ -430,7 +432,7 @@ class AutoEncoder(torch.nn.Module):
 
         return num, bin, cat
 
-    def compute_loss(self, num, bin, cat, target_df, logging=True):
+    def compute_loss(self, num, bin, cat, target_df, logging=True, _id=False):
         if logging:
             if self.logger is not None:
                 logging = True
@@ -454,8 +456,10 @@ class AutoEncoder(torch.nn.Module):
         if logging:
             if self.training:
                 self.logger.training_step(net_loss)
+            elif _id:
+                self.logger.id_val_step(net_loss)
             elif not self.training:
-                self.logger.end_epoch(net_loss)
+                self.logger.val_step(net_loss)
 
         net_loss = np.array(net_loss).mean()
         return mse_loss, bce_loss, cce_loss, net_loss
@@ -519,6 +523,10 @@ class AutoEncoder(torch.nn.Module):
             baseline = self.compute_baseline_performance(val_in, val_df)
             if self.verbose:
                 print(msg)
+            result = []
+            val_batches = len(val_df)//self.eval_batch_size
+            if len(val_df) % self.eval_batch_size != 0:
+                val_batches += 1
 
         n_updates = len(df)//self.batch_size
         if len(df) % self.batch_size > 0:
@@ -550,21 +558,36 @@ class AutoEncoder(torch.nn.Module):
             if val is not None:
                 self.eval()
                 with torch.no_grad():
-                    msg = '\n'
-                    num, bin, cat = self.forward(val_in)
-                    _, _, _, net_loss = self.compute_loss(num, bin, cat, val_df, logging=True)
-                    msg += 'net validation loss, swapped input: \n'
-                    msg += f"{round(net_loss, 4)} \n\n"
+                    swapped_loss = []
+                    id_loss = []
+                    for i in range(val_batches):
+                        start = i * self.eval_batch_size
+                        stop = (i+1) * self.eval_batch_size
 
-                    msg += 'baseline validation loss: '
-                    msg += f"{round(baseline, 4)} \n\n"
+                        slc_in = val_in.iloc[start:stop]
+                        slc_out = val_df.iloc[start:stop]
 
-                    num, bin, cat = self.forward(val_df)
-                    _, _, _, net_loss = self.compute_loss(num, bin, cat, val_df, logging=False)
-                    msg += 'net validation loss, unaltered input: \n'
-                    msg += f"{round(net_loss, 4)} \n\n\n"
+                        num, bin, cat = self.forward(slc_in)
+                        _, _, _, net_loss = self.compute_loss(num, bin, cat, slc_out)
+                        swapped_loss.append(net_loss)
 
+
+                        num, bin, cat = self.forward(slc_out)
+                        _, _, _, net_loss = self.compute_loss(num, bin, cat, slc_out, _id=True)
+                        id_loss.append(net_loss)
+
+                    self.logger.end_epoch()
                     if self.verbose:
+                        swapped_loss = np.array(swapped_loss).mean()
+                        id_loss = np.array(id_loss).mean()
+
+                        msg = '\n'
+                        msg += 'net validation loss, swapped input: \n'
+                        msg += f"{round(swapped_loss, 4)} \n\n"
+                        msg += 'baseline validation loss: '
+                        msg += f"{round(baseline, 4)} \n\n"
+                        msg += 'net validation loss, unaltered input: \n'
+                        msg += f"{round(id_loss, 4)} \n\n\n"
                         print(msg)
 
     def get_representation(self, df, layer=0):
@@ -577,21 +600,31 @@ class AutoEncoder(torch.nn.Module):
             layer < 0 counts layers back from encoding layer.
             layer > 0 counts layers forward from encoding layer.
         """
+        result = []
+        n_batches = len(df)//self.eval_batch_size
+        if len(df) % self.eval_batch_size != 0:
+            n_batches += 1
+
         self.eval()
         if self.optim is None:
             df = self.build_model(df)
         else:
             df = self.prepare_df(df)
         with torch.no_grad():
-            num, bin, embeddings = self.encode_input(df)
-            x = torch.cat(num + bin + embeddings, dim=1)
-            if layer <= 0:
-                layers = len(self.encoder) + layer
-                x = self.encode(x, layers=layers)
-            else:
-                x = self.encode(x)
-                x = self.decode(x, layers=layer)
-            return x.cpu().numpy()
+            for i in range(n_batches):
+                start = i * self.eval_batch_size
+                stop = (i+1) * self.eval_batch_size
+                num, bin, embeddings = self.encode_input(df.iloc[start:stop])
+                x = torch.cat(num + bin + embeddings, dim=1)
+                if layer <= 0:
+                    layers = len(self.encoder) + layer
+                    x = self.encode(x, layers=layers)
+                else:
+                    x = self.encode(x)
+                    x = self.decode(x, layers=layer)
+                result.append(x.cpu().numpy())
+        z = np.concatenate(result, axis=0)
+        return z
 
     def get_anomaly_score(self, df):
         """

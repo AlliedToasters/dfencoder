@@ -144,9 +144,9 @@ class AutoEncoderTest(TimedCase):
 
     def test_get_representation(self):
         encoder = AutoEncoder()
-        sample = df.sample(1024)
+        sample = df.sample(1025)
         z = encoder.get_representation(sample)
-        assert z.shape[0] == 1024
+        assert z.shape[0] == 1025
         assert z.shape[1] > 1
 
     def test_compute_baseline_performance(self):
@@ -184,9 +184,14 @@ class LoggerTest(TimedCase):
         assert len(logger.val_fts) == 3
         logger.training_step([0.2, 0.3, 0.2])
         logger.training_step([0.1, 0.1, -0.2])
-        logger.end_epoch(val_losses=[0.1, 0.1, 0.1])
+        logger.val_step([0.2, 0.3, 0.2])
+        logger.val_step([0.1, 0.1, -0.2])
+        logger.id_val_step([0.2, 0.3, 0.2])
+        logger.id_val_step([0.1, 0.1, -0.2])
+        logger.end_epoch()
         assert logger.train_fts['ft3'][1] == [0]
-        assert logger.val_fts['ft3'] == [0.1]
+        assert logger.val_fts['ft3'][1] == [0]
+        assert logger.id_val_fts['ft3'][1] == [0]
         assert logger.n_epochs == 1
 
     def test_ipynb_logger(self):
@@ -194,8 +199,11 @@ class LoggerTest(TimedCase):
         self.run_logging_test(logger)
         logger.training_step([0.2, 0.3, 0.2])
         logger.training_step([0.1, 0.1, -0.2])
-        logger.training_step([0.3, 0.0, 0.3])
-        #logger.end_epoch(val_losses=[0.05, 0.0, 0.1])
+        logger.val_step([0.2, 0.3, 0.2])
+        logger.val_step([0.1, 0.1, -0.2])
+        logger.id_val_step([0.2, 0.3, 0.2])
+        logger.id_val_step([0.1, 0.1, -0.2])
+        #logger.end_epoch()
 
 class ScalerTest(TimedCase):
 
