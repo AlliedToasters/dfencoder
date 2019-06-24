@@ -13,7 +13,7 @@ reqs= [
     'tqdm',
     'scikit-learn'
 ]
-version = '0.0.21'
+version = '0.0.22'
 
 setup(
     name='dfencoder',
