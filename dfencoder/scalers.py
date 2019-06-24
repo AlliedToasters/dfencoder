@@ -13,13 +13,13 @@ class StandardScaler(object):
         self.std = x.std()
 
     def transform(self, x):
-        result = x.astype(float).copy()
+        result = x.astype(float)
         result -= self.mean
         result /= self.std
         return result
 
     def inverse_transform(self, x):
-        result = x.astype(float).copy()
+        result = x.astype(float)
         result *= self.std
         result += self.mean
         return result
@@ -67,10 +67,10 @@ class NullScaler(object):
         pass
 
     def transform(self, x):
-        return x.copy()
+        return x
 
     def inverse_transform(self, x):
-        return x.copy()
+        return x
 
     def fit_transform(self, x):
         return self.transform(x)
