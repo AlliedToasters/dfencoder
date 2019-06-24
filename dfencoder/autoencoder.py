@@ -405,7 +405,9 @@ class AutoEncoder(torch.nn.Module):
 
         if self.verbose:
             print('done!')
-        return self.prepare_df(df)
+
+        if not self.save_memory:
+            return self.prepare_df(df)
 
     def compute_targets(self, df):
         num = torch.tensor(df[self.num_names].values).float().to(self.device)
@@ -548,8 +550,8 @@ class AutoEncoder(torch.nn.Module):
         """Does training."""
 
         if self.optim is None:
-            df = self.build_model(df)
-        elif not self.save_memory:
+            self.build_model(df)
+        if not self.save_memory:
             df = self.prepare_df(df)
 
         if val is not None:
