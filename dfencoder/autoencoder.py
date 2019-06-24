@@ -118,6 +118,7 @@ class AutoEncoder(torch.nn.Module):
             device=None,
             logger='basic',
             progress_bar=True,
+            save_memory=False,
             scaler='standard',
             *args,
             **kwargs
@@ -173,6 +174,8 @@ class AutoEncoder(torch.nn.Module):
 
         self.logger = logger
         self.scaler = scaler
+
+        self.save_memory = save_memory
 
     def get_scaler(self, name):
         scalers = {
@@ -285,15 +288,25 @@ class AutoEncoder(torch.nn.Module):
             trans_col = feature['scaler'].transform(col.values)
             trans_col = pd.Series(index=df.index, data=trans_col)
             output_df[ft] = trans_col
+            if self.save_memory:
+                del df[ft]
 
         for ft in self.binary_fts:
             feature = self.binary_fts[ft]
             output_df[ft] = df[ft].apply(lambda x: feature.get(x, False))
+            if self.save_memory:
+                del df[ft]
+
         for ft in self.categorical_fts:
             feature = self.categorical_fts[ft]
             col = pd.Categorical(df[ft], categories=feature['cats']+['_other'])
             col = col.fillna('_other')
             output_df[ft] = col
+            if self.save_memory:
+                del df[ft]
+
+        if self.save_memory:
+            del df
         return output_df
 
     def build_optimizer(self):
