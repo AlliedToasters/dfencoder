@@ -172,12 +172,16 @@ class AutoEncoder(torch.nn.Module):
             self.device = device
 
         self.logger = logger
-        if scaler == 'standard':
-            self.Scaler = StandardScaler
-        elif scaler == 'gauss_rank':
-            self.Scaler = GaussRankScaler
-        elif scaler is None:
-            self.Scaler = NullScaler
+        self.scaler = scaler
+
+    def get_scaler(self, name):
+        scalers = {
+            'standard':StandardScaler,
+            'gauss_rank':GaussRankScaler,
+            None:NullScaler,
+            'none':NullScaler
+        }
+        return scalers[name]
 
     def init_numeric(self, df):
         dt = df.dtypes
@@ -185,11 +189,17 @@ class AutoEncoder(torch.nn.Module):
         numeric += list(dt[dt==int].index)
         numeric += list(dt[dt==float].index)
 
+        if isinstance(self.scaler, str):
+            scalers = {ft:self.scaler for ft in numeric}
+        elif isinstance(self.scaler, dict):
+            scalers = self.scaler
+
         for ft in numeric:
+            Scaler = self.get_scaler(scalers.get(ft, 'gauss_rank'))
             feature = {
                 'mean':df[ft].mean(),
                 'std':df[ft].std(),
-                'scaler':self.Scaler()
+                'scaler':Scaler()
             }
             feature['scaler'].fit(df[ft][~df[ft].isna()].values)
             self.numeric_fts[ft] = feature

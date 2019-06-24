@@ -133,10 +133,12 @@ class AutoEncoderTest(TimedCase):
             lr=.01,
             lr_decay=.95,
             progress_bar=False,
-            scaler='gauss_rank'
+            scaler={'age':'standard'},
         )
         sample = df.sample(511)
         encoder.fit(sample, epochs=2)
+        assert isinstance(encoder.numeric_fts['age']['scaler'], StandardScaler)
+        assert isinstance(encoder.numeric_fts['fnlwgt']['scaler'], GaussRankScaler)
         assert encoder.lr_decay.get_lr()[0] < .01
         anomaly_score = encoder.get_anomaly_score(sample)
         assert anomaly_score.shape == (511,)
