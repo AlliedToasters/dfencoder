@@ -52,11 +52,38 @@ class CompleteLayer(torch.nn.Module):
         self.layers.append(linear)
         self.add_module('linear_layer', linear)
         if activation is not None:
-            self.layers.append(activation)
+            act = self.interpret_activation(activation)
+            self.layers.append(act)
         if dropout is not None:
             dropout_layer = torch.nn.Dropout(dropout)
             self.layers.append(dropout_layer)
             self.add_module('dropout', dropout_layer)
+
+    def interpret_activation(self, act=None):
+        if act is None:
+            act = self.activation
+        activations = {
+            'leaky_relu':torch.nn.functional.leaky_relu,
+            'relu':torch.relu,
+            'sigmoid':torch.sigmoid,
+            'tanh':torch.tanh,
+            'selu':torch.selu,
+            'hardtanh':torch.nn.functional.hardtanh,
+            'relu6':torch.nn.functional.relu6,
+            'elu':torch.nn.functional.elu,
+            'celu':torch.nn.functional.celu,
+            'rrelu':torch.nn.functional.rrelu,
+            'hardshrink':torch.nn.functional.hardshrink,
+            'tanhshrink':torch.nn.functional.tanhshrink,
+            'softsign':torch.nn.functional.softsign
+        }
+        try:
+            return activations[act]
+        except:
+            msg = f'activation {act} not understood. \n'
+            msg += 'please use one of: \n'
+            msg += str(list(activations.keys()))
+            raise Exception(msg)
 
     def forward(self, x):
         for layer in self.layers:
@@ -71,6 +98,8 @@ class AutoEncoder(torch.nn.Module):
             decoder_layers=None,
             encoder_dropout=None,
             decoder_dropout=None,
+            encoder_activations=None,
+            decoder_activations=None,
             activation='relu',
             min_cats=10,
             swap_p=.15,
@@ -99,6 +128,8 @@ class AutoEncoder(torch.nn.Module):
         self.categorical_fts = OrderedDict()
         self.encoder_layers = encoder_layers
         self.decoder_layers = decoder_layers
+        self.encoder_activations = encoder_activations
+        self.decoder_activations = decoder_activations
         self.encoder_dropout = encoder_dropout
         self.decoder_dropout = decoder_dropout
         self.min_cats = min_cats
@@ -147,19 +178,6 @@ class AutoEncoder(torch.nn.Module):
             self.Scaler = GaussRankScaler
         elif scaler is None:
             self.Scaler = NullScaler
-
-    def interpret_activation(self):
-        activation = self.activation
-        if activation=='relu':
-            return torch.relu
-        elif activation=='sigmoid':
-            return torch.sigmoid
-        elif activation=='tanh':
-            return torch.tanh
-        else:
-            msg = f'activation {activation} not understood. \n'
-            msg += 'please use one of: \n'
-            msg += "'relu', 'sigmoid', 'tanh'"
 
     def init_numeric(self, df):
         dt = df.dtypes
@@ -305,12 +323,18 @@ class AutoEncoder(torch.nn.Module):
         self.init_features(df)
         input_dim = self.build_inputs()
 
-        #do the actual model building
+        #construct a canned denoising autoencoder architecture
         if self.encoder_layers is None:
-            self.encoder_layers = [int(np.sqrt(2)*input_dim) for _ in range(2)]
+            self.encoder_layers = [int(4*input_dim) for _ in range(3)]
 
         if self.decoder_layers is None:
             self.decoder_layers = []
+
+        if self.encoder_activations is None:
+            self.encoder_activations = [self.activation for _ in self.encoder_layers]
+
+        if self.decoder_activations is None:
+            self.decoder_activations = [self.activation for _ in self.decoder_layers]
 
         if self.encoder_dropout is None or type(self.encoder_dropout) == float:
             drp = self.encoder_dropout
@@ -321,10 +345,7 @@ class AutoEncoder(torch.nn.Module):
             self.decoder_dropout = [drp for _ in self.decoder_layers]
 
         for i, dim in enumerate(self.encoder_layers):
-            if i != len(self.encoder_layers) - 1:
-                activation = self.interpret_activation()
-            else:
-                activation = None
+            activation = self.encoder_activations[i]
             layer = CompleteLayer(
                 input_dim,
                 dim,
@@ -336,10 +357,8 @@ class AutoEncoder(torch.nn.Module):
             self.add_module(f'encoder_{i}', layer)
 
         for i, dim in enumerate(self.decoder_layers):
-            if i != len(self.decoder_layers) - 1:
-                activation = self.interpret_activation()
-            else:
-                activation = None
+
+            activation = self.decoder_activations[i]
             layer = CompleteLayer(
                 input_dim,
                 dim,

@@ -21,7 +21,7 @@ class TimedCase(unittest.TestCase):
 
 class TestCompleteLayer(TimedCase):
     def test_init(self):
-        layer = CompleteLayer(12, 5, activation=torch.sigmoid, dropout=.2)
+        layer = CompleteLayer(12, 5, activation='sigmoid', dropout=.2)
         assert len(layer.layers) == 3
         return layer
 
@@ -31,6 +31,10 @@ class TestCompleteLayer(TimedCase):
         out = layer(x)
         assert out.shape == (34, 5)
         assert (out == 0).any().any()
+
+    def test_interpret_activation(self):
+        result = CompleteLayer.interpret_activation(None, 'leaky_relu')
+        assert result == torch.nn.functional.leaky_relu
 
 class AutoEncoderTest(TimedCase):
 
