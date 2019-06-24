@@ -288,25 +288,17 @@ class AutoEncoder(torch.nn.Module):
             trans_col = feature['scaler'].transform(col.values)
             trans_col = pd.Series(index=df.index, data=trans_col)
             output_df[ft] = trans_col
-            if self.save_memory:
-                del df[ft]
 
         for ft in self.binary_fts:
             feature = self.binary_fts[ft]
             output_df[ft] = df[ft].apply(lambda x: feature.get(x, False))
-            if self.save_memory:
-                del df[ft]
 
         for ft in self.categorical_fts:
             feature = self.categorical_fts[ft]
             col = pd.Categorical(df[ft], categories=feature['cats']+['_other'])
             col = col.fillna('_other')
             output_df[ft] = col
-            if self.save_memory:
-                del df[ft]
 
-        if self.save_memory:
-            del df
         return output_df
 
     def build_optimizer(self):
@@ -552,9 +544,10 @@ class AutoEncoder(torch.nn.Module):
 
     def fit(self, df, epochs=1, val=None):
         """Does training."""
+
         if self.optim is None:
             df = self.build_model(df)
-        else:
+        elif not self.save_memory:
             df = self.prepare_df(df)
 
         if val is not None:
@@ -579,20 +572,11 @@ class AutoEncoder(torch.nn.Module):
                 print(f'training epoch {i+1}...')
             df = df.sample(frac=1.0)
             df = EncoderDataFrame(df)
-            input_df = df.swap(likelihood=self.swap_p)
-            for j in tqdm.trange(n_updates, disable=not self.progress_bar):
-                start = j * self.batch_size
-                stop = (j+1) * self.batch_size
-                in_sample = input_df.iloc[start:stop]
-                target_sample = df.iloc[start:stop]
-                num, bin, cat = self.forward(in_sample)
-                mse, bce, cce, net_loss = self.compute_loss(
-                    num, bin, cat, target_sample,
-                    logging=True
-                )
-                self.do_backward(mse, bce, cce)
-                self.optim.step()
-                self.optim.zero_grad()
+            if self.save_memory:
+                self.train_megabatch_epoch(n_updates, df)
+            else:
+                input_df = df.swap(likelihood=self.swap_p)
+                self.train_epoch(n_updates, input_df, df)
 
             if self.lr_decay is not None:
                 self.lr_decay.step()
@@ -631,6 +615,67 @@ class AutoEncoder(torch.nn.Module):
                         msg += 'net validation loss, unaltered input: \n'
                         msg += f"{round(id_loss, 4)} \n\n\n"
                         print(msg)
+
+    def train_epoch(self, n_updates, input_df, df, pbar=None):
+        """Run regular epoch."""
+
+        if pbar is None and self.progress_bar:
+            close = True
+            pbar = tqdm.tqdm(total=n_updates)
+        else:
+            close = False
+
+        for j in range(n_updates):
+
+            start = j * self.batch_size
+            stop = (j+1) * self.batch_size
+            in_sample = input_df.iloc[start:stop]
+            target_sample = df.iloc[start:stop]
+            num, bin, cat = self.forward(in_sample)
+            mse, bce, cce, net_loss = self.compute_loss(
+                num, bin, cat, target_sample,
+                logging=True
+            )
+            self.do_backward(mse, bce, cce)
+            self.optim.step()
+            self.optim.zero_grad()
+
+            if self.progress_bar:
+                pbar.update(1)
+        if close:
+            pbar.close()
+
+    def train_megabatch_epoch(self, n_updates, df):
+        """
+        Run epoch doing 'megabatch' updates, preprocessing data in large
+        chunks.
+        """
+        if self.progress_bar:
+            pbar = tqdm.tqdm(total=n_updates)
+        else:
+            pbar = None
+
+        n_rows = len(df)
+        n_megabatches = 10
+        batch_size = self.batch_size
+        res = n_rows/n_megabatches
+        batches_per_megabatch = (res // batch_size) + 1
+        megabatch_size = batches_per_megabatch * batch_size
+        final_batch_size = n_rows - (n_megabatches - 1) * megabatch_size
+
+        for i in range(n_megabatches):
+            megabatch_start = int(i * megabatch_size)
+            megabatch_stop = int((i+1) * megabatch_size)
+            megabatch = df.iloc[megabatch_start:megabatch_stop]
+            megabatch = self.prepare_df(megabatch)
+            input_df = megabatch.swap(self.swap_p)
+            if i == (n_megabatches-1):
+                n_updates = int(final_batch_size//batch_size)
+                if final_batch_size % batch_size > 0:
+                    n_updates += 1
+            else:
+                n_updates = int(batches_per_megabatch)
+            self.train_epoch(n_updates, input_df, megabatch, pbar=pbar)
 
     def get_representation(self, df, layer=0):
         """
