@@ -13,18 +13,26 @@ class EncoderDataFrame(pd.DataFrame):
             row.
         Returns a copy of the dataframe with equal size.
         """
-        #copy initial df for preservation of true values
-        result = self.copy()
 
         #select values to swap
-        donors = np.random.random(size=(self.__len__(), len(self.columns)))
-        donors = np.where(donors < likelihood, True, False)
-        changers = donors.copy()
-        np.random.shuffle(changers)
+        tot_rows = self.__len__()
+        n_rows = int(round(tot_rows*likelihood))
+        n_cols = len(self.columns)
 
-        #and swap them
-        for i, col in enumerate(self.columns):
-            changer_idx = changers[:, i]
-            donor_idx = donors[:, i]
-            result.loc[changer_idx, col] = self[col][donor_idx].values
+        def gen_indices():
+            column = np.repeat(np.arange(n_cols).reshape(1, -1), repeats=n_rows, axis=0)
+            row = np.random.randint(0, tot_rows, size=(n_rows, n_cols))
+            return row, column
+
+        row, column = gen_indices()
+        new_mat = self.values
+        to_place = new_mat[row, column]
+
+        row, column = gen_indices()
+        new_mat[row, column] = to_place
+
+        dtypes = {col:typ for col, typ in zip(self.columns, self.dtypes)}
+        result = EncoderDataFrame(columns=self.columns, data=new_mat)
+        result = result.astype(dtypes, copy=False)
+
         return result
