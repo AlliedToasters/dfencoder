@@ -154,6 +154,7 @@ class AutoEncoderTest(TimedCase):
         z = encoder.get_representation(sample)
         assert z.shape[0] == 1025
         assert z.shape[1] > 1
+        assert isinstance(z, torch.Tensor)
 
     def test_get_deep_stack_features(self):
         encoder = AutoEncoder(
@@ -162,10 +163,9 @@ class AutoEncoderTest(TimedCase):
         )
         sample = df.sample(1025)
         z = encoder.get_deep_stack_features(sample)
-        print(z.shape)
         assert z.shape[0] == 1025
-        print(z.shape[1]) == 411
-
+        assert z.shape[1] == 411
+        assert isinstance(z, torch.Tensor)
 
     def test_compute_baseline_performance(self):
         encoder = AutoEncoder()

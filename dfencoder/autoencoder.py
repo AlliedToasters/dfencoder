@@ -711,8 +711,8 @@ class AutoEncoder(torch.nn.Module):
                 else:
                     x = self.encode(x)
                     x = self.decode(x, layers=layer)
-                result.append(x.cpu().numpy())
-        z = np.concatenate(result, axis=0)
+                result.append(x)
+        z = torch.cat(result, dim=0)
         return z
 
     def get_deep_stack_features(self, df):
@@ -740,13 +740,13 @@ class AutoEncoder(torch.nn.Module):
                 x = torch.cat(num + bin + embeddings, dim=1)
                 for layer in self.encoder:
                     x = layer(x)
-                    this_batch.append(x.cpu().numpy())
+                    this_batch.append(x)
                 for layer in self.decoder:
                     x = layer(x)
-                    this_batch.append(x.cpu().numpy())
-                z = np.concatenate(this_batch, axis=1)
+                    this_batch.append(x)
+                z = torch.cat(this_batch, dim=1)
                 result.append(z)
-        result = np.concatenate(result, axis=0)
+        result = torch.cat(result, dim=0)
         return result
 
     def get_anomaly_score(self, df):
