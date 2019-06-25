@@ -84,8 +84,7 @@ class AutoEncoderTest(TimedCase):
 
     def test_build_vanilla_model(self):
         encoder = AutoEncoder()
-        out_df = encoder.build_model(df)
-        assert not out_df.isna().any().any()
+        encoder.build_model(df)
 
     def test_build_model(self):
 
@@ -100,7 +99,8 @@ class AutoEncoderTest(TimedCase):
             optimizer='sgd',
             lr_decay=.95
         )
-        out_df = encoder.build_model(df)
+        encoder.build_model(df)
+        out_df = encoder.prepare_df(df)
         assert not out_df.isna().any().any()
         layers_count = 0
         for prm in encoder.parameters():
@@ -154,6 +154,18 @@ class AutoEncoderTest(TimedCase):
         z = encoder.get_representation(sample)
         assert z.shape[0] == 1025
         assert z.shape[1] > 1
+
+    def test_get_deep_stack_features(self):
+        encoder = AutoEncoder(
+            encoder_layers = [50, 100, 150],
+            decoder_layers = [44, 67]
+        )
+        sample = df.sample(1025)
+        z = encoder.get_deep_stack_features(sample)
+        print(z.shape)
+        assert z.shape[0] == 1025
+        print(z.shape[1]) == 411
+
 
     def test_compute_baseline_performance(self):
         encoder = AutoEncoder()

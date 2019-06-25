@@ -119,8 +119,7 @@ class AutoEncoder(torch.nn.Module):
             device=None,
             logger='basic',
             progress_bar=True,
-            save_memory=False,
-            n_megabatches=10,
+            n_megabatches=1,
             scaler='standard',
             *args,
             **kwargs
@@ -177,7 +176,6 @@ class AutoEncoder(torch.nn.Module):
         self.logger = logger
         self.scaler = scaler
 
-        self.save_memory = save_memory
         self.n_megabatches = n_megabatches
 
     def get_scaler(self, name):
@@ -407,9 +405,6 @@ class AutoEncoder(torch.nn.Module):
         if self.verbose:
             print('done!')
 
-        if not self.save_memory:
-            return self.prepare_df(df)
-
     def compute_targets(self, df):
         num = torch.tensor(df[self.num_names].values).float().to(self.device)
         bin = torch.tensor(df[self.bin_names].astype(int).values).float().to(self.device)
@@ -552,7 +547,7 @@ class AutoEncoder(torch.nn.Module):
 
         if self.optim is None:
             self.build_model(df)
-        if not self.save_memory:
+        if self.n_megabatches==1:
             df = self.prepare_df(df)
 
         if val is not None:
@@ -577,7 +572,7 @@ class AutoEncoder(torch.nn.Module):
                 print(f'training epoch {i+1}...')
             df = df.sample(frac=1.0)
             df = EncoderDataFrame(df)
-            if self.save_memory:
+            if self.n_megabatches > 1:
                 self.train_megabatch_epoch(n_updates, df)
             else:
                 input_df = df.swap(likelihood=self.swap_p)
@@ -702,9 +697,8 @@ class AutoEncoder(torch.nn.Module):
 
         self.eval()
         if self.optim is None:
-            df = self.build_model(df)
-        else:
-            df = self.prepare_df(df)
+            self.build_model(df)
+        df = self.prepare_df(df)
         with torch.no_grad():
             for i in range(n_batches):
                 start = i * self.eval_batch_size
@@ -720,6 +714,40 @@ class AutoEncoder(torch.nn.Module):
                 result.append(x.cpu().numpy())
         z = np.concatenate(result, axis=0)
         return z
+
+    def get_deep_stack_features(self, df):
+        """
+        records and outputs all internal representations
+        of input df as row-wise vectors.
+        Output is 2-d array with len() == len(df)
+        """
+        result = []
+
+        n_batches = len(df)//self.eval_batch_size
+        if len(df) % self.eval_batch_size != 0:
+            n_batches += 1
+
+        self.eval()
+        if self.optim is None:
+            self.build_model(df)
+        df = self.prepare_df(df)
+        with torch.no_grad():
+            for i in range(n_batches):
+                this_batch = []
+                start = i * self.eval_batch_size
+                stop = (i+1) * self.eval_batch_size
+                num, bin, embeddings = self.encode_input(df.iloc[start:stop])
+                x = torch.cat(num + bin + embeddings, dim=1)
+                for layer in self.encoder:
+                    x = layer(x)
+                    this_batch.append(x.cpu().numpy())
+                for layer in self.decoder:
+                    x = layer(x)
+                    this_batch.append(x.cpu().numpy())
+                z = np.concatenate(this_batch, axis=1)
+                result.append(z)
+        result = np.concatenate(result, axis=0)
+        return result
 
     def get_anomaly_score(self, df):
         """
