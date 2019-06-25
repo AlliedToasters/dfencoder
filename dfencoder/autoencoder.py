@@ -1,4 +1,5 @@
 from collections import OrderedDict
+import gc
 
 import pandas as pd
 import numpy as np
@@ -680,6 +681,9 @@ class AutoEncoder(torch.nn.Module):
             else:
                 n_updates = int(batches_per_megabatch)
             self.train_epoch(n_updates, input_df, megabatch, pbar=pbar)
+            del input_df
+            del megabatch
+            print(gc.collect())
 
     def get_representation(self, df, layer=0):
         """
