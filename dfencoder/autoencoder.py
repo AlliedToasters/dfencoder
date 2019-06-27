@@ -7,7 +7,7 @@ import torch
 import tqdm
 
 from .dataframe import EncoderDataFrame
-from .logging import BasicLogger, IpynbLogger
+from .logging import BasicLogger, IpynbLogger, TensorboardXLogger
 from .scalers import StandardScaler, NullScaler, GaussRankScaler
 
 def ohe(input_vector, dim, device="cpu"):
@@ -118,6 +118,9 @@ class AutoEncoder(torch.nn.Module):
             verbose=False,
             device=None,
             logger='basic',
+            logdir='_dir/',
+            project_embeddings=True,
+            run=None,
             progress_bar=True,
             n_megabatches=1,
             scaler='standard',
@@ -174,6 +177,10 @@ class AutoEncoder(torch.nn.Module):
             self.device = device
 
         self.logger = logger
+        self.logdir = logdir
+        self.run = run
+        self.project_embeddings = project_embeddings
+
         self.scaler = scaler
 
         self.n_megabatches = n_megabatches
@@ -399,6 +406,8 @@ class AutoEncoder(torch.nn.Module):
             self.logger = BasicLogger(fts=fts)
         elif self.logger == 'ipynb':
             self.logger = IpynbLogger(fts=fts)
+        elif self.logger == 'tensorboard':
+            self.logger = TensorboardXLogger(logdir=self.logdir, run=self.run, fts=fts)
         #returns a copy of preprocessed dataframe.
         self.to(self.device)
 
@@ -603,6 +612,8 @@ class AutoEncoder(torch.nn.Module):
                         id_loss.append(net_loss)
 
                     self.logger.end_epoch()
+                    if self.project_embeddings:
+                        self.logger.show_embeddings(self.categorical_fts)
                     if self.verbose:
                         swapped_loss = np.array(swapped_loss).mean()
                         id_loss = np.array(id_loss).mean()

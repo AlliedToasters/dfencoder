@@ -1,5 +1,6 @@
 from collections import OrderedDict
 import math
+from time import time
 
 import numpy as np
 
@@ -92,3 +93,72 @@ class IpynbLogger(BasicLogger):
         self.plt.xlabel('epochs')
         self.plt.ylabel('loss')
         self.plt.show();
+
+class TensorboardXLogger(BasicLogger):
+
+    def __init__(self, logdir='_log/', run=None, *args, **kwargs):
+        super(TensorboardXLogger, self).__init__(*args, **kwargs)
+        from tensorboardX import SummaryWriter
+        import os
+
+        if run is None:
+            try:
+                n_runs = len(os.listdir(logdir))
+            except FileNotFoundError:
+                n_runs = 0
+            logdir = logdir+f'{n_runs:04d}'
+        else:
+            logdir = logdir + str(run)
+        self.writer = SummaryWriter(logdir)
+        self.n_train_step = 0
+        self.n_val_step = 0
+        self.n_id_val_step = 0
+
+    def training_step(self, losses):
+        self.n_train_step += 1
+        losses = np.array(losses)
+        for i, ft in enumerate(self.fts):
+            self.writer.add_scalar('online' + f'_{ft}_' + 'train_loss', losses[i], self.n_train_step)
+            self.train_fts[ft][0].append(losses[i])
+        self.writer.add_scalar('online' + '_mean_' + 'train_loss', losses.mean(), self.n_train_step)
+
+    def val_step(self, losses):
+        #self.n_val_step += 1
+        for i, ft in enumerate(self.fts):
+            #self.writer.add_scalar(f'_{ft}_' + 'val_loss', losses[i], self.n_val_step)
+            self.val_fts[ft][0].append(losses[i])
+
+    def id_val_step(self, losses):
+        #self.n_id_val_step += 1
+        for i, ft in enumerate(self.fts):
+            #self.writer.add_scalar(f'_{ft}_' + 'id_loss', losses[i], self.n_id_val_step)
+            self.id_val_fts[ft][0].append(losses[i])
+
+    def end_epoch(self, val_losses=None):
+        super(TensorboardXLogger, self).end_epoch()
+
+        train_loss = [self.train_fts[ft][1][-1] for ft in self.fts]
+        for i, ft in enumerate(self.fts):
+            self.writer.add_scalar(f'{ft}_' + 'train_loss', train_loss[i], self.n_epochs)
+        train_loss = np.array(train_loss).mean()
+        self.writer.add_scalar('mean_train_loss', train_loss, self.n_epochs)
+
+        val_loss = [self.val_fts[ft][1][-1] for ft in self.fts]
+        for i, ft in enumerate(self.fts):
+            self.writer.add_scalar(f'{ft}_' + 'val_loss', val_loss[i], self.n_epochs)
+        val_loss = np.array(val_loss).mean()
+        self.writer.add_scalar('mean_val_loss', val_loss, self.n_epochs)
+
+        id_val_loss = [self.id_val_fts[ft][1][-1] for ft in self.fts]
+        for i, ft in enumerate(self.fts):
+            self.writer.add_scalar(f'{ft}_' + 'train_loss', id_val_loss[i], self.n_epochs)
+        id_val_loss = np.array(id_val_loss).mean()
+        self.writer.add_scalar('mean_id_val_loss', id_val_loss, self.n_epochs)
+
+    def show_embeddings(self, categories):
+        for ft in categories:
+            feature = categories[ft]
+            cats = feature['cats'] + ['_other']
+            emb = feature['embedding']
+            mat = emb.weight.data.cpu().numpy()
+            self.writer.add_embedding(mat, metadata=cats, tag=ft, global_step=self.n_epochs)

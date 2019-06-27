@@ -1,5 +1,8 @@
 import unittest
 import time
+import os
+import shutil
+from collections import OrderedDict
 
 import pandas as pd
 import numpy as np
@@ -7,7 +10,7 @@ import torch
 
 from dfencoder import EncoderDataFrame
 from dfencoder import AutoEncoder, compute_embedding_size, CompleteLayer
-from dfencoder import BasicLogger, IpynbLogger
+from dfencoder import BasicLogger, IpynbLogger, TensorboardXLogger
 from dfencoder import StandardScaler, NullScaler, GaussRankScaler
 
 class TimedCase(unittest.TestCase):
@@ -198,6 +201,7 @@ class LoggerTest(TimedCase):
         self.run_logging_test(logger)
 
     def run_logging_test(self, logger):
+        n_epochs = logger.n_epochs
         assert len(logger.train_fts) == 3
         assert len(logger.val_fts) == 3
         logger.training_step([0.2, 0.3, 0.2])
@@ -207,10 +211,10 @@ class LoggerTest(TimedCase):
         logger.id_val_step([0.2, 0.3, 0.2])
         logger.id_val_step([0.1, 0.1, -0.2])
         logger.end_epoch()
-        assert logger.train_fts['ft3'][1] == [0]
-        assert logger.val_fts['ft3'][1] == [0]
-        assert logger.id_val_fts['ft3'][1] == [0]
-        assert logger.n_epochs == 1
+        assert logger.train_fts['ft3'][1][-1] == 0
+        assert logger.val_fts['ft3'][1][-1] == 0
+        assert logger.id_val_fts['ft3'][1][-1] == 0
+        assert logger.n_epochs == n_epochs + 1
 
     def test_ipynb_logger(self):
         logger = IpynbLogger(fts=['ft1', 'ft2', 'ft3'], baseline_loss=0.2)
@@ -222,6 +226,24 @@ class LoggerTest(TimedCase):
         logger.id_val_step([0.2, 0.3, 0.2])
         logger.id_val_step([0.1, 0.1, -0.2])
         #logger.end_epoch()
+
+    def test_tensorboardx_logger(self):
+        logger = TensorboardXLogger(logdir='_testlog/', fts=['ft1', 'ft2', 'ft3'])
+        cats = OrderedDict()
+        cats['cat1'] = {
+            'cats': ['cow', 'horse', 'pig', 'cat'],
+            'embedding': torch.nn.Embedding(5, 4),
+            'output_layer': None
+        }
+        cats['cat2'] = {
+            'cats': ['cow', 'horse', 'pig', 'cat'],
+            'embedding': torch.nn.Embedding(5, 4),
+            'output_layer': None
+        }
+        for i in range(10):
+            self.run_logging_test(logger)
+            logger.show_embeddings(cats)
+
 
 class ScalerTest(TimedCase):
 
@@ -252,5 +274,8 @@ class ScalerTest(TimedCase):
         assert .99 < x_.std() < 1.01
 
 if __name__ == '__main__':
+    os.mkdir('_testlog')
     df = pd.read_csv('adult.csv')
-    unittest.main()
+    unittest.main(exit=False)
+    shutil.rmtree('_testlog')
+    quit()
