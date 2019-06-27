@@ -762,16 +762,17 @@ class AutoEncoder(torch.nn.Module):
 
 
         mse_loss = self.mse(num, num_target)
-        net_loss = mse_loss.cpu().data.sum(dim=1)
+        net_loss = [mse_loss.data]
         bce_loss = self.bce(bin, bin_target)
-        net_loss += bce_loss.cpu().data.sum(dim=1)
+        net_loss += [bce_loss.data]
         cce_loss = []
         for i, ft in enumerate(self.categorical_fts):
             loss = self.cce(cat[i], codes[i])
             cce_loss.append(loss)
-            net_loss += loss.cpu().data
+            net_loss += [loss.data.reshape(-1, 1)]
 
-        return net_loss
+        net_loss = torch.cat(net_loss, dim=1).mean(dim=1)
+        return net_loss.cpu().numpy()
 
     def decode_to_df(self, x, df=None):
         """
