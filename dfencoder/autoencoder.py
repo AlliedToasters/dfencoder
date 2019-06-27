@@ -118,7 +118,7 @@ class AutoEncoder(torch.nn.Module):
             verbose=False,
             device=None,
             logger='basic',
-            logdir='_dir/',
+            logdir='logdir/',
             project_embeddings=True,
             run=None,
             progress_bar=True,

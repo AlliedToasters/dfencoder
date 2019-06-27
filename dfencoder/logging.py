@@ -96,7 +96,7 @@ class IpynbLogger(BasicLogger):
 
 class TensorboardXLogger(BasicLogger):
 
-    def __init__(self, logdir='_log/', run=None, *args, **kwargs):
+    def __init__(self, logdir='logdir/', run=None, *args, **kwargs):
         super(TensorboardXLogger, self).__init__(*args, **kwargs)
         from tensorboardX import SummaryWriter
         import os
