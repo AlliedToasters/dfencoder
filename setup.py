@@ -9,11 +9,13 @@ Currently in development.
 reqs= [
     'torch',
     'numpy',
-    'pandas',
+    'pandas<1.0.0',
     'tqdm',
-    'scikit-learn'
+    'scikit-learn',
+    'tensorboardX',
+    'matplotlib'
 ]
-version = '0.0.34'
+version = '0.0.35'
 
 setup(
     name='dfencoder',
