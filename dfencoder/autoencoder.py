@@ -873,7 +873,7 @@ class AutoEncoder(torch.nn.Module):
         num, bin, cat = self.decode(x)
 
         num_cols = [x for x in self.numeric_fts.keys()]
-        num_df = pd.DataFrame(data=num.cpu().numpy(), index=df.index)
+        num_df = pd.DataFrame(data=num[:, :len(num_cols)].cpu().numpy(), index=df.index)
         num_df.columns = num_cols
         for ft in num_df.columns:
             feature = self.numeric_fts[ft]
@@ -881,6 +881,18 @@ class AutoEncoder(torch.nn.Module):
             trans_col = feature['scaler'].inverse_transform(col.values)
             result = pd.Series(index=df.index, data=trans_col)
             num_df[ft] = result
+
+        cyc_cols = [x for x in self.cyclical_fts.keys()]
+        cyc_df = pd.DataFrame(columns=cyc_cols, index=df.index)
+
+        for ft in cyc_cols:
+            iloc = self.num_names.index(ft)
+            col = num[:, iloc]
+            feature = self.cyclical_fts[ft]
+            trans_col = feature['scaler'].inverse_transform(col.cpu().numpy())
+            trans_col = pd.Series(index=df.index, data=trans_col).astype(int)
+            result = pd.to_datetime(trans_col)
+            cyc_df[ft] = result
 
         bin_cols = [x for x in self.binary_fts.keys()]
         bin_df = pd.DataFrame(data=bin.cpu().numpy(), index=df.index)
@@ -904,7 +916,7 @@ class AutoEncoder(torch.nn.Module):
             cat_df[ft] = cat_df[ft].apply(lambda x: cats[x])
 
         #concat
-        output_df = pd.concat([num_df, bin_df, cat_df], axis=1)
+        output_df = pd.concat([num_df, bin_df, cat_df, cyc_df], axis=1)
 
         return output_df[df.columns]
 
