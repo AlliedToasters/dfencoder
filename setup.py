@@ -1,4 +1,5 @@
 from distutils.core import setup
+import setuptools
 import os
 
 long_desc = """
@@ -13,7 +14,8 @@ reqs= [
     'tqdm',
     'scikit-learn',
     'tensorboardX',
-    'matplotlib'
+    'matplotlib', 
+    'wheel'
 ]
 version = '0.0.36'
 
@@ -27,5 +29,6 @@ setup(
     url='https://github.com/alliedtoasters/dfencoder',
     download_url=f'https://github.com/alliedtoasters/dfencoder/archive/v{version}.tar.gz',
     install_requires=reqs,
+    setup_requires=reqs,
     packages=['dfencoder']
 )
