@@ -9,7 +9,7 @@ import numpy as np
 import torch
 
 from dfencoder import EncoderDataFrame
-from dfencoder import AutoEncoder, compute_embedding_size, CompleteLayer
+from dfencoder import AutoEncoder, compute_embedding_size, CompleteLayer, NullIndicator
 from dfencoder import BasicLogger, IpynbLogger, TensorboardXLogger
 from dfencoder import StandardScaler, NullScaler, GaussRankScaler
 
@@ -69,6 +69,14 @@ class AutoEncoderTest(TimedCase):
         assert len(encoder.binary_fts) == len(encoder.bin_names)
         del df['mybin']
 
+    def test_init_cyclical(self):
+        df['mytime'] = 1539435837534561201
+        df['mytime'] = pd.to_datetime(df['mytime'])
+        df.loc[10, 'mytime'] = np.nan
+        encoder = AutoEncoder()
+        encoder.init_cyclical(df)
+        assert list(encoder.cyclical_fts.keys()) == ['mytime']
+
     def test_init_features(self):
         encoder = AutoEncoder()
         encoder.init_features(df)
@@ -120,7 +128,11 @@ class AutoEncoderTest(TimedCase):
     def test_forward(self):
         encoder, sample = self.test_encode_input()
         num, bin, cat = encoder.forward(sample)
-        assert num.shape == (32, 6)
+        #raise Exception(num.shape)
+        if 'mytime' in encoder.cyclical_fts:
+            assert num.shape == (32, 15)
+        else:
+            assert num.shape == (32, 6)
         assert bin.shape == (32, 2)
         assert len(cat) == 7
         return encoder, num, bin, cat, sample
@@ -138,6 +150,8 @@ class AutoEncoderTest(TimedCase):
             progress_bar=False,
             scaler={'age':'standard'},
         )
+        df['mytime'] = 1539435837534561201
+        df['mytime'] = pd.to_datetime(df['mytime'])
         sample = df.sample(511)
         encoder.fit(sample, epochs=2)
         assert isinstance(encoder.numeric_fts['age']['scaler'], StandardScaler)
@@ -188,7 +202,11 @@ class EncoderDataFrameTest(TimedCase):
         ef['test2'] = ['a','b', 'c']
 
     def test_swap(self):
-        ef = EncoderDataFrame(df)
+        cols = list(df.columns)
+        if 'mytime' in cols:
+            cols.remove('mytime')
+        df_ = df[cols]
+        ef = EncoderDataFrame(df_)
         scr = ef.swap()
         assert (scr == ef).any().all()
         assert (scr != ef).any().all()
@@ -272,6 +290,26 @@ class ScalerTest(TimedCase):
         x_ = scaler.fit_transform(x)
         assert np.abs(x_.mean()) < 0.01
         assert .99 < x_.std() < 1.01
+
+class NullIndicatorTest(TimedCase):
+
+    def test_null_indicator(self):
+        ind = NullIndicator()
+        test_df = pd.DataFrame(columns=['has null', 'has no null'])
+        test_df['has null'] = np.random.randn(100)
+        test_df.loc[4, 'has null'] = np.nan
+        test_df['has no null'] = np.random.randn(100)
+        ind.fit(test_df)
+        assert 'has null' in ind.fts
+        assert 'has no null' not in ind.fts
+        output_df = ind.transform(test_df)
+        assert 'has null_was_nan' in output_df.columns
+        assert output_df.loc[4, 'has null_was_nan'] == True
+        ind2 = NullIndicator(required_fts=['has no null'])
+        ind2.fit(test_df)
+        output_df = ind2.transform(test_df)
+        assert len(output_df.columns) == 4
+        assert not output_df['has no null_was_nan'].any()
 
 if __name__ == '__main__':
     os.mkdir('_testlog')

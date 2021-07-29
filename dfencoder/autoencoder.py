@@ -33,6 +33,27 @@ def compute_embedding_size(n_categories):
     val = min(600, round(1.6 * n_categories**0.56))
     return int(val)
 
+class NullIndicator(object):
+    """
+    Utility to generate indicator features
+    binary features indicating whether an input
+    was null in the original dataframe.
+    """
+
+    def __init__(self, required_fts=[]):
+        self.fts = required_fts
+
+    def fit(self, df):
+        columns = df.isna().any()
+        self.fts += list(columns.index[columns.values])
+
+    def transform(self, df):
+        for ft in self.fts:
+            col = df[ft].isna()
+            df[ft + '_was_nan'] = col
+        return df
+
+
 class CompleteLayer(torch.nn.Module):
     """
     Impliments a layer with linear transformation
@@ -131,6 +152,7 @@ class AutoEncoder(torch.nn.Module):
         self.numeric_fts = OrderedDict()
         self.binary_fts = OrderedDict()
         self.categorical_fts = OrderedDict()
+        self.cyclical_fts = OrderedDict()
         self.encoder_layers = encoder_layers
         self.decoder_layers = decoder_layers
         self.encoder_activations = encoder_activations
@@ -215,7 +237,20 @@ class AutoEncoder(torch.nn.Module):
             feature['scaler'].fit(df[ft][~df[ft].isna()].values)
             self.numeric_fts[ft] = feature
 
-        self.num_names = list(self.numeric_fts.keys())
+        for ft in self.cyclical_fts:
+            #we'll scale only the raw timestamp values
+            #for cyclical features
+            Scaler = self.get_scaler(scalers.get(ft, 'gauss_rank'))
+            data = df[ft].astype(int).astype(float)
+            feature = {
+                'mean':data.mean(),
+                'std':data.std(),
+                'scaler':Scaler()
+            }
+            feature['scaler'].fit(data[~data.isna()].values)
+            self.cyclical_fts[ft] = feature
+
+        self.num_names += list(self.numeric_fts.keys())
 
     def init_cats(self, df):
         dt = df.dtypes
@@ -224,6 +259,8 @@ class AutoEncoder(torch.nn.Module):
             feature = {}
             vl = df[ft].value_counts()
             if len(vl) < 3:
+                #if there are less than 3 categories,
+                #treat as binary ft.
                 feature['cats'] = list(vl.index)
                 self.binary_fts[ft] = feature
                 continue
@@ -238,6 +275,7 @@ class AutoEncoder(torch.nn.Module):
             feature = self.binary_fts[ft]
             for i, cat in enumerate(feature['cats']):
                 feature[cat] = bool(i)
+        #these are the 'true' binary features
         for ft in binaries:
             feature = dict()
             feature['cats'] = [True, False]
@@ -247,7 +285,23 @@ class AutoEncoder(torch.nn.Module):
 
         self.bin_names = list(self.binary_fts.keys())
 
+    def init_cyclical(self, df):
+        dt = df.dtypes
+        cyc = list(dt[dt=='datetime64[ns]'].index)
+        for ft in cyc:
+            feature = dict()
+            #just keeping track of names
+            self.cyclical_fts[ft] = None
+            self.num_names += [
+                ft,
+                ft + '_sin_tod', ft + '_cos_tod',
+                ft + '_sin_dow', ft + '_cos_dow',
+                ft + '_sin_dom', ft + '_cos_dom',
+                ft + '_sin_doy', ft + '_cos_doy'
+                ]
+
     def init_features(self, df):
+        self.init_cyclical(df)
         self.init_numeric(df)
         self.init_cats(df)
         self.init_binary(df)
@@ -271,10 +325,16 @@ class AutoEncoder(torch.nn.Module):
         input_dim += len(self.numeric_fts)
         input_dim += len(self.binary_fts)
 
+        # 9 cyclical components 
+        # sin/cos time of day, sin/cos week, sin/cos month, sin/cos doy
+        # plus raw timestamp
+        input_dim += int(len(self.cyclical_fts) * 9)
+
         return input_dim
 
     def build_outputs(self, dim):
-        self.numeric_output = torch.nn.Linear(dim, len(self.numeric_fts))
+        numeric_output = len(self.numeric_fts) + int(len(self.cyclical_fts) * 9)
+        self.numeric_output = torch.nn.Linear(dim, numeric_output)
         self.binary_output = torch.nn.Linear(dim, len(self.binary_fts))
 
         for ft in self.categorical_fts:
@@ -290,6 +350,40 @@ class AutoEncoder(torch.nn.Module):
         Returns copy.
         """
         output_df = EncoderDataFrame()
+        for ft in self.cyclical_fts:
+            col = df[ft]
+
+            #handle raw timestamp as if it were numeric feature
+            feature = self.cyclical_fts[ft]
+            col = col.fillna(feature['mean'])
+            trans_col = feature['scaler'].transform(col.values)
+            trans_col = pd.Series(index=df.index, data=trans_col)
+            output_df[ft] = trans_col
+
+            #get time of day features
+            second_of_day = col.dt.hour * 60 * 60 + col.dt.minute * 60 + col.dt.second
+            period = 24 * 60 * 60
+            output_df[ft+'_sin_tod'] = np.sin(second_of_day/(period/(2*np.pi))).values
+            output_df[ft+'_cos_tod'] = np.cos(second_of_day/(period/(2*np.pi))).values
+
+            #get day of week features
+            day_of_week = col.dt.dayofweek
+            period = 7
+            output_df[ft+'_sin_dow'] = np.sin(day_of_week/(period/(2*np.pi))).values
+            output_df[ft+'_cos_dow'] = np.cos(day_of_week/(period/(2*np.pi))).values
+
+            #get day of month features
+            day_of_month = col.dt.day
+            period = 31 #approximate period
+            output_df[ft+'_sin_dom'] = np.sin(day_of_month/(period/(2*np.pi))).values
+            output_df[ft+'_cos_dom'] = np.cos(day_of_month/(period/(2*np.pi))).values
+
+            #get day of year
+            day_of_year = col.dt.dayofyear
+            period = 365
+            output_df[ft+'_sin_doy'] = np.sin(day_of_year/(period/(2*np.pi))).values
+            output_df[ft+'_cos_doy'] = np.cos(day_of_year/(period/(2*np.pi))).values
+
         for ft in self.numeric_fts:
             feature = self.numeric_fts[ft]
             col = df[ft].fillna(feature['mean'])
@@ -794,12 +888,13 @@ class AutoEncoder(torch.nn.Module):
             cols = [x for x in self.binary_fts.keys()]
             cols += [x for x in self.numeric_fts.keys()]
             cols += [x for x in self.categorical_fts.keys()]
+            cols += [x for x in self.cyclical_fts.keys()]
             df = pd.DataFrame(index=range(len(x)), columns=cols)
 
         num, bin, cat = self.decode(x)
 
         num_cols = [x for x in self.numeric_fts.keys()]
-        num_df = pd.DataFrame(data=num.cpu().numpy(), index=df.index)
+        num_df = pd.DataFrame(data=num[:, :len(num_cols)].cpu().numpy(), index=df.index)
         num_df.columns = num_cols
         for ft in num_df.columns:
             feature = self.numeric_fts[ft]
@@ -807,6 +902,18 @@ class AutoEncoder(torch.nn.Module):
             trans_col = feature['scaler'].inverse_transform(col.values)
             result = pd.Series(index=df.index, data=trans_col)
             num_df[ft] = result
+
+        cyc_cols = [x for x in self.cyclical_fts.keys()]
+        cyc_df = pd.DataFrame(columns=cyc_cols, index=df.index)
+
+        for ft in cyc_cols:
+            iloc = self.num_names.index(ft)
+            col = num[:, iloc]
+            feature = self.cyclical_fts[ft]
+            trans_col = feature['scaler'].inverse_transform(col.cpu().numpy())
+            trans_col = pd.Series(index=df.index, data=trans_col).astype(int)
+            result = pd.to_datetime(trans_col)
+            cyc_df[ft] = result
 
         bin_cols = [x for x in self.binary_fts.keys()]
         bin_df = pd.DataFrame(data=bin.cpu().numpy(), index=df.index)
@@ -830,7 +937,7 @@ class AutoEncoder(torch.nn.Module):
             cat_df[ft] = cat_df[ft].apply(lambda x: cats[x])
 
         #concat
-        output_df = pd.concat([num_df, bin_df, cat_df], axis=1)
+        output_df = pd.concat([num_df, bin_df, cat_df, cyc_df], axis=1)
 
         return output_df[df.columns]
 
