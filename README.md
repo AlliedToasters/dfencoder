@@ -25,3 +25,8 @@ Contributors are welcomed! Please reach out with PRs.
 # Feature Requests and Bugs
 We'd like to release a stable version soon, so in the meantime please submit feature requests and bug reports on this repository's issues page.
 ## Thanks for your interest in this project!
+
+# Features
+This library is a personal project so progress is slow. The latest release as of this writing is `v0.0.36` which introduces handling for timestamp data; will use cyclical encoding to encode time of day, day of week, day of month, day of year, as well as the raw timestamp scaled as a numeric feature to encode raw linear time. <br><br>
+
+Pre-process your timestamp columns by using pandas: `pd.to_datetime()` so `dfencoder` can infer the datatype and handle it accordingly. 
