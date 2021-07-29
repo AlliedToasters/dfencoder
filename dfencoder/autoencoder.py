@@ -33,6 +33,27 @@ def compute_embedding_size(n_categories):
     val = min(600, round(1.6 * n_categories**0.56))
     return int(val)
 
+class NullIndicator(object):
+    """
+    Utility to generate indicator features
+    binary features indicating whether an input
+    was null in the original dataframe.
+    """
+
+    def __init__(self, required_fts=[]):
+        self.fts = required_fts
+
+    def fit(self, df):
+        columns = df.isna().any()
+        self.fts += list(columns.index[columns.values])
+
+    def transform(self, df):
+        for ft in self.fts:
+            col = df[ft].isna()
+            df[ft + '_was_nan'] = col
+        return df
+
+
 class CompleteLayer(torch.nn.Module):
     """
     Impliments a layer with linear transformation

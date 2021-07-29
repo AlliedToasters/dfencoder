@@ -9,7 +9,7 @@ import numpy as np
 import torch
 
 from dfencoder import EncoderDataFrame
-from dfencoder import AutoEncoder, compute_embedding_size, CompleteLayer
+from dfencoder import AutoEncoder, compute_embedding_size, CompleteLayer, NullIndicator
 from dfencoder import BasicLogger, IpynbLogger, TensorboardXLogger
 from dfencoder import StandardScaler, NullScaler, GaussRankScaler
 
@@ -72,6 +72,7 @@ class AutoEncoderTest(TimedCase):
     def test_init_cyclical(self):
         df['mytime'] = 1539435837534561201
         df['mytime'] = pd.to_datetime(df['mytime'])
+        df.loc[10, 'mytime'] = np.nan
         encoder = AutoEncoder()
         encoder.init_cyclical(df)
         assert list(encoder.cyclical_fts.keys()) == ['mytime']
@@ -289,6 +290,26 @@ class ScalerTest(TimedCase):
         x_ = scaler.fit_transform(x)
         assert np.abs(x_.mean()) < 0.01
         assert .99 < x_.std() < 1.01
+
+class NullIndicatorTest(TimedCase):
+
+    def test_null_indicator(self):
+        ind = NullIndicator()
+        test_df = pd.DataFrame(columns=['has null', 'has no null'])
+        test_df['has null'] = np.random.randn(100)
+        test_df.loc[4, 'has null'] = np.nan
+        test_df['has no null'] = np.random.randn(100)
+        ind.fit(test_df)
+        assert 'has null' in ind.fts
+        assert 'has no null' not in ind.fts
+        output_df = ind.transform(test_df)
+        assert 'has null_was_nan' in output_df.columns
+        assert output_df.loc[4, 'has null_was_nan'] == True
+        ind2 = NullIndicator(required_fts=['has no null'])
+        ind2.fit(test_df)
+        output_df = ind2.transform(test_df)
+        assert len(output_df.columns) == 4
+        assert not output_df['has no null_was_nan'].any()
 
 if __name__ == '__main__':
     os.mkdir('_testlog')
