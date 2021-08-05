@@ -18,7 +18,7 @@ reqs= [
     'wheel',
     'dill'
 ]
-version = '0.0.36'
+version = '0.0.37'
 
 setup(
     name='dfencoder',
