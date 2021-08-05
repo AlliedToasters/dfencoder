@@ -49,6 +49,9 @@ class BasicLogger(object):
                 self.id_val_fts[ft][1].append(mean)
                 #reset id_val_fts log
                 self.id_val_fts[ft][0] = []
+    
+    def show_embeddings(self, categories):
+        pass
 
 class IpynbLogger(BasicLogger):
     """Plots Logging Data in jupyter notebook"""

@@ -5,10 +5,24 @@ import pandas as pd
 import numpy as np
 import torch
 import tqdm
+import dill
+import json
 
 from .dataframe import EncoderDataFrame
 from .logging import BasicLogger, IpynbLogger, TensorboardXLogger
 from .scalers import StandardScaler, NullScaler, GaussRankScaler
+
+
+
+
+def load_model(path):
+    """
+    Loads serialized model from input path.
+    """
+    with open(path, 'rb') as f:
+        loaded_serialized_model = f.read()
+        loaded_model = dill.loads(loaded_serialized_model)
+    return loaded_model
 
 def ohe(input_vector, dim, device="cpu"):
     """Does one-hot encoding of input vector."""
@@ -52,6 +66,7 @@ class NullIndicator(object):
             col = df[ft].isna()
             df[ft + '_was_nan'] = col
         return df
+
 
 
 class CompleteLayer(torch.nn.Module):
@@ -854,6 +869,80 @@ class AutoEncoder(torch.nn.Module):
         result = torch.cat(result, dim=0)
         return result
 
+    def _deserialize_json(self, data):
+        """
+        encodes json data into appropriate features
+        for inference.
+        "data" should be a string.
+        """
+        data = json.loads(data)
+        return data
+        row = pd.DataFrame()
+        for item in data:
+            row[item] = [data[item]]
+        return row
+
+    
+    def compute_targets_dict(self, data):
+        numeric = []
+        for num_name in self.num_names:
+            raw_value = data[num_name]
+            trans_value = self.numeric_fts[num_name]['scaler'].transform(np.array([raw_value]))
+            numeric.append(trans_value)
+        num = torch.tensor(numeric).reshape(1, -1).float().to(self.device)
+
+        binary = []
+        for bin_name in self.bin_names:
+            value = data[bin_name]
+            code = self.binary_fts[bin_name][value]
+            binary.append(int(code))
+        bin = torch.tensor(binary).reshape(1, -1).float().to(self.device)
+        codes = []
+        for ft in self.categorical_fts:
+            category = data[ft]
+            code = self.categorical_fts[ft]['cats'].index(category)
+            code = torch.tensor(code).to(self.device)
+            codes.append(code)
+        return num, bin, codes
+
+    def encode_input_dict(self, data):
+        """
+        Handles raw df inputs.
+        Passes categories through embedding layers.
+        """
+        num, bin, codes = self.compute_targets_dict(data)
+        embeddings = []
+        for i, ft in enumerate(self.categorical_fts):
+            feature = self.categorical_fts[ft]
+            emb = feature['embedding'](codes[i]).reshape(1, -1)
+            embeddings.append(emb)
+        return [num], [bin], embeddings
+
+    def get_deep_stack_features_json(self, data):
+        """
+        gets "deep stack" features for a single record;
+        intended for executing "inference" logic for a
+        network request.
+        data can either be a json string or a dict.
+        """
+        if isinstance(data, str):
+            data = self._deserialize_json(data)
+
+        self.eval()
+
+        with torch.no_grad():
+            this_batch = []
+            num, bin, embeddings = self.encode_input_dict(data)
+            x = torch.cat(num + bin + embeddings, dim=1)
+            for layer in self.encoder:
+                x = layer(x)
+                this_batch.append(x)
+            for layer in self.decoder:
+                x = layer(x)
+                this_batch.append(x)
+            z = torch.cat(this_batch, dim=1)
+        return z
+
     def get_anomaly_score(self, df):
         """
         Returns a per-row loss of the input dataframe.
@@ -957,3 +1046,11 @@ class AutoEncoder(torch.nn.Module):
             output_df = self.decode_to_df(x, df=df)
 
         return output_df
+
+    def save(self, path):
+        """
+        Saves serialized model to input path.
+        """
+        with open(path, 'wb') as f:
+            serialized_model = dill.dumps(self)
+            f.write(serialized_model)
