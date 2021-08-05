@@ -26,7 +26,16 @@ Contributors are welcomed! Please reach out with PRs.
 We'd like to release a stable version soon, so in the meantime please submit feature requests and bug reports on this repository's issues page.
 ## Thanks for your interest in this project!
 
+# Dataframe Encoding
+`dfencoder` does some manipulation to encode features to feed into the
+feed-forward MLP. This HLD hopefully clears up how this looks.
+![HLD for how inputs are encoded by dfencoder](demo_data/input_handling_hld.png)
+
 # Features
-This library is a personal project so progress is slow. The latest release as of this writing is `v0.0.36` which introduces handling for timestamp data; will use cyclical encoding to encode time of day, day of week, day of month, day of year, as well as the raw timestamp scaled as a numeric feature to encode raw linear time. <br><br>
+This library is a personal project so progress is slow. The latest release as of this writing is `v0.0.37` which introduces "inference mode"
+that optimizes inference for single records, on json inputs.
+
+## Previous Releases:
+`v0.0.36` which introduces handling for timestamp data; will use cyclical encoding to encode time of day, day of week, day of month, day of year, as well as the raw timestamp scaled as a numeric feature to encode raw linear time. <br><br>
 
 Pre-process your timestamp columns by using pandas: `pd.to_datetime()` so `dfencoder` can infer the datatype and handle it accordingly. 
