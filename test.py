@@ -2,6 +2,7 @@ import unittest
 import time
 import os
 import shutil
+import json
 from collections import OrderedDict
 
 import pandas as pd
@@ -21,6 +22,37 @@ class TimedCase(unittest.TestCase):
     def tearDown(self):
         t = time.time() - self.startTime
         print("%s: %.3f seconds" % (self.id(), t))
+
+class ModelBuilder(object):
+
+    def __init__(self):
+        self.model = None
+        self.out_df = None
+
+    def build_model(self):
+        if self.model is None:
+            encoder = AutoEncoder(
+                encoder_layers=[32, 32],
+                decoder_layers=[32, 32],
+                encoder_dropout=.5,
+                decoder_dropout=[.2, None],
+                activation='tanh',
+                swap_p=.2,
+                batch_size=123,
+                optimizer='sgd',
+                lr_decay=.95
+            )
+            encoder.build_model(df)
+            out_df = encoder.prepare_df(df)
+            assert not out_df.isna().any().any()
+            layers_count = 0
+            for prm in encoder.parameters():
+                layers_count += 1
+            assert layers_count == 33
+            self.model, self.out_df = encoder, out_df
+            return encoder, out_df
+        else:
+            return self.model, self.out_df
 
 class TestCompleteLayer(TimedCase):
     def test_init(self):
@@ -164,6 +196,17 @@ class AutoEncoderTest(TimedCase):
         assert (data.columns == sample.columns).all()
         assert data.shape == sample.shape
         return encoder
+
+    def test_inference(self):
+        record = df.sample()
+        js = record.iloc[0].to_json()
+        output = model._deserialize_json(js)
+        z_json = model.get_deep_stack_features_json(js)
+        dct = json.loads(js)
+        z_dict = model.get_deep_stack_features_json(dct)
+        z = model.get_deep_stack_features(record)
+        assert (z_json == z).all()
+        assert (z_json == z_dict).all()
 
     def test_get_representation(self):
         encoder = AutoEncoder()
@@ -314,6 +357,8 @@ class NullIndicatorTest(TimedCase):
 if __name__ == '__main__':
     os.mkdir('_testlog')
     df = pd.read_csv('adult.csv')
+    b = ModelBuilder()
+    model, _ = b.build_model()
     unittest.main(exit=False)
     shutil.rmtree('_testlog')
     quit()

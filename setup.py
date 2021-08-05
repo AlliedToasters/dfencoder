@@ -15,7 +15,8 @@ reqs= [
     'scikit-learn',
     'tensorboardX',
     'matplotlib', 
-    'wheel'
+    'wheel',
+    'dill'
 ]
 version = '0.0.36'
 
