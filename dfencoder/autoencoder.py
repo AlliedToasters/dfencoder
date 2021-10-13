@@ -370,7 +370,7 @@ class AutoEncoder(torch.nn.Module):
 
             #handle raw timestamp as if it were numeric feature
             feature = self.cyclical_fts[ft]
-            col = col.fillna(feature['mean'])
+            col = col.fillna(pd.to_datetime(feature['mean']))
             trans_col = feature['scaler'].transform(col.values)
             trans_col = pd.Series(index=df.index, data=trans_col)
             output_df[ft] = trans_col

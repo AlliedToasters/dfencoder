@@ -184,6 +184,7 @@ class AutoEncoderTest(TimedCase):
         )
         df['mytime'] = 1539435837534561201
         df['mytime'] = pd.to_datetime(df['mytime'])
+        df['mytime'] = pd.to_datetime(np.where(np.random.random(df.shape[0]) > .9, None, df['mytime']))
         sample = df.sample(511)
         encoder.fit(sample, epochs=2)
         assert isinstance(encoder.numeric_fts['age']['scaler'], StandardScaler)
