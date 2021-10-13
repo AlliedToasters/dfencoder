@@ -32,10 +32,10 @@ feed-forward MLP. This HLD hopefully clears up how this looks.
 ![HLD for how inputs are encoded by dfencoder](demo_data/input_handling_hld.png)
 
 # Features
-This library is a personal project so progress is slow. The latest release as of this writing is `v0.0.37` which introduces "inference mode"
-that optimizes inference for single records, on json inputs.
+This library is a personal project so progress is slow. The latest release as of this writing is `v0.0.38` which fixes an issue handling null records in timestamp columns.
 
 ## Previous Releases:
-`v0.0.36` which introduces handling for timestamp data; will use cyclical encoding to encode time of day, day of week, day of month, day of year, as well as the raw timestamp scaled as a numeric feature to encode raw linear time. <br><br>
+`v0.0.37` which introduces "inference mode"
+that optimizes inference for single records, on json inputs. <br><br>
 
 Pre-process your timestamp columns by using pandas: `pd.to_datetime()` so `dfencoder` can infer the datatype and handle it accordingly. 
