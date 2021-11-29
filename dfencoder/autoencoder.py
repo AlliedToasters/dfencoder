@@ -151,6 +151,7 @@ class AutoEncoder(torch.nn.Module):
 
         self.num_names = []
         self.bin_names = []
+        self.cat_names = []
 
         self.activation = activation
         self.optimizer = optimizer
@@ -214,12 +215,13 @@ class AutoEncoder(torch.nn.Module):
             }
             feature['scaler'].fit(df[ft][~df[ft].isna()].values)
             self.numeric_fts[ft] = feature
-
+            # self.num_names.append(ft)
         self.num_names = list(self.numeric_fts.keys())
 
     def init_cats(self, df):
         dt = df.dtypes
-        objects = list(dt[dt==pd.Categorical].index)
+        # objects = list(dt[dt==pd.Categorical].index) # pandas < 1.0.0 (e.g.: pandas==0.25.3)
+        objects = list(dt[dt==np.object].index) 
         for ft in objects:
             feature = {}
             vl = df[ft].value_counts()
@@ -230,6 +232,8 @@ class AutoEncoder(torch.nn.Module):
             cats = list(vl[vl >= self.min_cats].index)
             feature['cats'] = cats
             self.categorical_fts[ft] = feature
+            # self.cat_names.append(ft)
+        self.cat_names = list(self.categorical_fts.keys())
 
     def init_binary(self, df):
         dt = df.dtypes
@@ -244,7 +248,7 @@ class AutoEncoder(torch.nn.Module):
             feature[True] = True
             feature[False] = False
             self.binary_fts[ft] = feature
-
+            # self.bin_names.append(ft)
         self.bin_names = list(self.binary_fts.keys())
 
     def init_features(self, df):
@@ -321,6 +325,14 @@ class AutoEncoder(torch.nn.Module):
                 weight_decay=self.weight_decay,
                 betas=self.betas
             )
+        elif self.optimizer == 'adamw':
+            return torch.optim.AdamW(
+                params,
+                lr=self.lr,
+                amsgrad=self.amsgrad,
+                weight_decay=self.weight_decay,
+                betas=self.betas
+            )
         elif self.optimizer == 'sgd':
             return torch.optim.SGD(
                 params,
@@ -328,8 +340,7 @@ class AutoEncoder(torch.nn.Module):
                 momentum=self.momentum,
                 nesterov=self.nesterov,
                 dampening=self.dampening,
-                weight_decay=self.weight_decay,
-
+                weight_decay=self.weight_decay
             )
 
     def build_model(self, df):
@@ -398,10 +409,10 @@ class AutoEncoder(torch.nn.Module):
         #get optimizer
         self.optim = self.build_optimizer()
         if self.lr_decay is not None:
-            self.lr_decay = torch.optim.lr_scheduler.ExponentialLR(self.optim, self.lr_decay)
+            self.lr_decay = torch.optim.lr_scheduler.ExponentialLR(self.optim, self.lr_decay, verbose=self.verbose)
 
-        cat_names = list(self.categorical_fts.keys())
-        fts = self.num_names + self.bin_names + cat_names
+        # cat_anmes = list(self.categorical_fts.keys())
+        fts = self.num_names + self.bin_names + self.cat_names
         if self.logger == 'basic':
             self.logger = BasicLogger(fts=fts)
         elif self.logger == 'ipynb':
@@ -417,11 +428,11 @@ class AutoEncoder(torch.nn.Module):
     def compute_targets(self, df):
         num = torch.tensor(df[self.num_names].values).float().to(self.device)
         bin = torch.tensor(df[self.bin_names].astype(int).values).float().to(self.device)
-        codes = []
-        for ft in self.categorical_fts:
-            feature = self.categorical_fts[ft]
-            code = torch.tensor(df[ft].cat.codes.astype(int).values).to(self.device)
-            codes.append(code)
+        codes = [torch.tensor(df[ft].cat.codes.astype(int).values).to(self.device) for ft in self.cat_names]
+        # for ft in self.categorical_fts:
+        #     # feature = self.categorical_fts[ft]
+        #     code = torch.tensor(df[ft].cat.codes.astype(int).values).to(self.device)
+        #     codes.append(code)
         return num, bin, codes
 
     def encode_input(self, df):
@@ -483,12 +494,15 @@ class AutoEncoder(torch.nn.Module):
                 logging = False
         net_loss = []
         num_target, bin_target, codes = self.compute_targets(target_df)
+        
         mse_loss = self.mse(num, num_target)
         net_loss += list(mse_loss.mean(dim=0).cpu().detach().numpy())
         mse_loss = mse_loss.mean()
+        
         bce_loss = self.bce(bin, bin_target)
         net_loss += list(bce_loss.mean(dim=0).cpu().detach().numpy())
         bce_loss = bce_loss.mean()
+        
         cce_loss = []
         for i, ft in enumerate(self.categorical_fts):
             loss = self.cce(cat[i], codes[i])
@@ -567,10 +581,6 @@ class AutoEncoder(torch.nn.Module):
             baseline = self.compute_baseline_performance(val_in, val_df)
             if self.verbose:
                 print(msg)
-            result = []
-            val_batches = len(val_df)//self.eval_batch_size
-            if len(val_df) % self.eval_batch_size != 0:
-                val_batches += 1
 
         n_updates = len(df)//self.batch_size
         if len(df) % self.batch_size > 0:
@@ -578,7 +588,7 @@ class AutoEncoder(torch.nn.Module):
         for i in range(epochs):
             self.train()
             if self.verbose:
-                print(f'training epoch {i+1}...')
+                print(f'training epoch {i+1}, learning rate {self.lr}...')
             df = df.sample(frac=1.0)
             df = EncoderDataFrame(df)
             if self.n_megabatches > 1:
@@ -591,6 +601,9 @@ class AutoEncoder(torch.nn.Module):
                 self.lr_decay.step()
 
             if val is not None:
+                val_batches = len(val_df)//self.eval_batch_size
+                if len(val_df) % self.eval_batch_size != 0:
+                    val_batches += 1
                 self.eval()
                 with torch.no_grad():
                     swapped_loss = []
@@ -606,30 +619,28 @@ class AutoEncoder(torch.nn.Module):
                         _, _, _, net_loss = self.compute_loss(num, bin, cat, slc_out)
                         swapped_loss.append(net_loss)
 
-
                         num, bin, cat = self.forward(slc_out)
                         _, _, _, net_loss = self.compute_loss(num, bin, cat, slc_out, _id=True)
                         id_loss.append(net_loss)
 
-                    self.logger.end_epoch()
-                    if self.project_embeddings:
-                        self.logger.show_embeddings(self.categorical_fts)
-                    if self.verbose:
-                        swapped_loss = np.array(swapped_loss).mean()
-                        id_loss = np.array(id_loss).mean()
+                self.logger.end_epoch()
+                if self.project_embeddings and isinstance(self.logger, TensorboardXLogger):
+                    self.logger.show_embeddings(self.categorical_fts)
+                if self.verbose:
+                    swapped_loss = np.array(swapped_loss).mean()
+                    id_loss = np.array(id_loss).mean()
 
-                        msg = '\n'
-                        msg += 'net validation loss, swapped input: \n'
-                        msg += f"{round(swapped_loss, 4)} \n\n"
-                        msg += 'baseline validation loss: '
-                        msg += f"{round(baseline, 4)} \n\n"
-                        msg += 'net validation loss, unaltered input: \n'
-                        msg += f"{round(id_loss, 4)} \n\n\n"
-                        print(msg)
+                    msg = '\n'
+                    msg += 'net validation loss, swapped input: \n'            
+                    msg += f"{round(swapped_loss, 4)} \n\n"
+                    msg += 'baseline validation loss: '
+                    msg += f"{round(baseline, 4)} \n\n"
+                    msg += 'net validation loss, unaltered input: \n'
+                    msg += f"{round(id_loss, 4)} \n\n\n"
+                    print(msg)
 
     def train_epoch(self, n_updates, input_df, df, pbar=None):
         """Run regular epoch."""
-
         if pbar is None and self.progress_bar:
             close = True
             pbar = tqdm.tqdm(total=n_updates)
@@ -637,7 +648,6 @@ class AutoEncoder(torch.nn.Module):
             close = False
 
         for j in range(n_updates):
-
             start = j * self.batch_size
             stop = (j+1) * self.batch_size
             in_sample = input_df.iloc[start:stop]
@@ -760,7 +770,7 @@ class AutoEncoder(torch.nn.Module):
         result = torch.cat(result, dim=0)
         return result
 
-    def get_anomaly_score(self, df):
+    def get_anomaly_score(self, df, loss_breakdown = False):
         """
         Returns a per-row loss of the input dataframe.
         Does not corrupt inputs.
@@ -770,7 +780,6 @@ class AutoEncoder(torch.nn.Module):
         num_target, bin_target, codes = self.compute_targets(data)
         with torch.no_grad():
             num, bin, cat = self.forward(data)
-
 
         mse_loss = self.mse(num, num_target)
         net_loss = [mse_loss.data]
@@ -783,6 +792,8 @@ class AutoEncoder(torch.nn.Module):
             net_loss += [loss.data.reshape(-1, 1)]
 
         net_loss = torch.cat(net_loss, dim=1).mean(dim=1)
+        if loss_breakdown: 
+            return net_loss.cpu().numpy(), mse_loss.cpu().numpy(), bce_loss.cpu().numpy(), [cce.cpu().numpy() for cce in cce_loss]
         return net_loss.cpu().numpy()
 
     def decode_to_df(self, x, df=None):
