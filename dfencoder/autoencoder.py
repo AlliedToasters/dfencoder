@@ -265,7 +265,7 @@ class AutoEncoder(torch.nn.Module):
             feature['scaler'].fit(data[~data.isna()].values)
             self.cyclical_fts[ft] = feature
 
-        self.num_names += list(self.numeric_fts.keys())
+        self.num_names = list(self.numeric_fts.keys())
 
     def init_cats(self, df):
         dt = df.dtypes
@@ -283,7 +283,7 @@ class AutoEncoder(torch.nn.Module):
             cats = list(vl[vl >= self.min_cats].index)
             feature['cats'] = cats
             self.categorical_fts[ft] = feature
-        self.cat_names += list(self.categorical_fts.keys())
+        self.cat_names = list(self.categorical_fts.keys())
 
     def init_binary(self, df):
         dt = df.dtypes
