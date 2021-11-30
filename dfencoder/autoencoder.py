@@ -41,6 +41,7 @@ def compute_embedding_size(n_categories):
     """
     Applies a standard formula to choose the number of feature embeddings
     to use in a given embedding layers.
+
     n_categories is the number of unique categories in a column.
     """
     val = min(600, round(1.6 * n_categories**0.56))
@@ -282,6 +283,7 @@ class AutoEncoder(torch.nn.Module):
             cats = list(vl[vl >= self.min_cats].index)
             feature['cats'] = cats
             self.categorical_fts[ft] = feature
+        self.cat_names += list(self.categorical_fts.keys())
 
     def init_binary(self, df):
         dt = df.dtypes
@@ -453,6 +455,7 @@ class AutoEncoder(torch.nn.Module):
         """
         Takes a pandas dataframe as input.
         Builds autoencoder model.
+
         Returns the dataframe after making changes.
         """
         if self.verbose:
@@ -639,8 +642,10 @@ class AutoEncoder(torch.nn.Module):
             prediction for the identity function (predicting input==output)
             with a swapped (noisy) input,
             and computing the loss against the unaltered original data.
+
         This should be roughly the loss we expect when the encoder degenerates
             into the identity function solution.
+
         Returns net loss on baseline performance computation
             (sum of all losses)
         """
@@ -809,6 +814,7 @@ class AutoEncoder(torch.nn.Module):
         """
         Computes latent feature vector from hidden layer
             given input dataframe.
+
         argument layer (int) specifies which layer to get.
         by default (layer=0), returns the "encoding" layer.
             layer < 0 counts layers back from encoding layer.
