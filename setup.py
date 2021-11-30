@@ -10,7 +10,7 @@ Currently in development.
 reqs= [
     'torch',
     'numpy',
-    'pandas<1.0.0',
+    'pandas',
     'tqdm',
     'scikit-learn',
     'tensorboardX',
