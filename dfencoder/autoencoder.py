@@ -29,7 +29,7 @@ def ohe(input_vector, dim, device="cpu"):
     batch_size = len(input_vector)
     nb_digits = dim
 
-    y = input_vector.reshape(-1, 1)
+    y = input_vector.reshape(-1, 1).long()
     y_onehot = torch.FloatTensor(batch_size, nb_digits).to(device)
 
     y_onehot.zero_()
