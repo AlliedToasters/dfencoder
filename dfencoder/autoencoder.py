@@ -542,7 +542,7 @@ class AutoEncoder(torch.nn.Module):
         embeddings = []
         for i, ft in enumerate(self.categorical_fts):
             feature = self.categorical_fts[ft]
-            emb = feature['embedding'](codes[i])
+            emb = feature['embedding'](codes[i].long())
             embeddings.append(emb)
         return [num], [bin], embeddings
 
@@ -600,7 +600,7 @@ class AutoEncoder(torch.nn.Module):
         bce_loss = bce_loss.mean()
         cce_loss = []
         for i, ft in enumerate(self.categorical_fts):
-            loss = self.cce(cat[i], codes[i])
+            loss = self.cce(cat[i], codes[i].long())
             loss = loss.mean()
             cce_loss.append(loss)
             val = loss.cpu().item()
@@ -914,7 +914,7 @@ class AutoEncoder(torch.nn.Module):
         embeddings = []
         for i, ft in enumerate(self.categorical_fts):
             feature = self.categorical_fts[ft]
-            emb = feature['embedding'](codes[i]).reshape(1, -1)
+            emb = feature['embedding'](codes[i].long()).reshape(1, -1)
             embeddings.append(emb)
         return [num], [bin], embeddings
 
@@ -961,7 +961,7 @@ class AutoEncoder(torch.nn.Module):
         net_loss += [bce_loss.data]
         cce_loss = []
         for i, ft in enumerate(self.categorical_fts):
-            loss = self.cce(cat[i], codes[i])
+            loss = self.cce(cat[i], codes[i].long())
             cce_loss.append(loss)
             net_loss += [loss.data.reshape(-1, 1)]
 
