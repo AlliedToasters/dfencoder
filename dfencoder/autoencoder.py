@@ -269,7 +269,11 @@ class AutoEncoder(torch.nn.Module):
 
     def init_cats(self, df):
         dt = df.dtypes
-        objects = list(dt[dt==pd.Categorical].index)
+        objects = []
+        for name, item in zip(dt.index, dt):
+            if item == 'object':
+                objects.append(name)
+        #objects = list(dt[dt==pd.Categorical].index)
         for ft in objects:
             feature = {}
             vl = df[ft].value_counts()
@@ -894,7 +898,8 @@ class AutoEncoder(torch.nn.Module):
         binary = []
         for bin_name in self.bin_names:
             value = data[bin_name]
-            code = self.binary_fts[bin_name][value]
+            coder = self.binary_fts[bin_name]
+            code = coder[value]
             binary.append(int(code))
         bin = torch.tensor(binary).reshape(1, -1).float().to(self.device)
         codes = []
