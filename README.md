@@ -4,6 +4,13 @@ Want to learn useful nonlinear representations of your tabular data? Don't have 
 Currently under development.<br><br>
 # Installation
 We highly recommend using a virtual environment to install! This software has only been tested using python 3.6.<br><br>
+### Update July 2022
+We're finally moving on from old pandas and python. The latest version supports python 3.9 and pandas>1.0.0. To install, clone this repository and install via pip:
+```
+pip install .
+```
+
+
 The bare-bones requirements are installed automatically by pip. You may also want to install jupyter and matplotlib to run notebooks and the ipynb logger, but these are not requirements to install.<br><br>
 Install using:<br><br>
 ```
