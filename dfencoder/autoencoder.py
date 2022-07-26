@@ -306,7 +306,10 @@ class AutoEncoder(torch.nn.Module):
 
     def init_cyclical(self, df):
         dt = df.dtypes
-        cyc = list(dt[dt=='datetime64[ns]'].index)
+        cyc = []
+        for col, val in zip(dt.index, dt.values):
+            if 'datetime' in str(val):
+                cyc.append(col)
         for ft in cyc:
             feature = dict()
             #just keeping track of names
