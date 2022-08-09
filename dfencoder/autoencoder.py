@@ -67,6 +67,18 @@ class NullIndicator(object):
             df[ft + '_was_nan'] = col
         return df
 
+    def transform_dict(self, d):
+        output = dict()
+        for ft in self.fts:
+            col = d.get(ft)
+            if col is None:
+                output[ft + '_was_nan'] = True
+            else:
+                output[ft + '_was_nan'] = False
+        output = {**output, **d}
+        return output
+
+
 
 
 class CompleteLayer(torch.nn.Module):
@@ -890,22 +902,40 @@ class AutoEncoder(torch.nn.Module):
     def compute_targets_dict(self, data):
         numeric = []
         for num_name in self.num_names:
-            raw_value = data[num_name]
-            trans_value = self.numeric_fts[num_name]['scaler'].transform(np.array([raw_value]))
+            feature =self.numeric_fts[num_name]
+            raw_value = data.get(num_name)
+            #handle missing data
+            if raw_value is None:
+                raw_value = feature['mean']
+            elif isinstance(raw_value, float) and np.isnan(raw_value):
+                raw_value = feature['mean']
+            trans_value = feature['scaler'].transform(np.array([raw_value]))
             numeric.append(trans_value)
         num = torch.tensor(numeric).reshape(1, -1).float().to(self.device)
 
         binary = []
         for bin_name in self.bin_names:
-            value = data[bin_name]
-            coder = self.binary_fts[bin_name]
-            code = coder[value]
-            binary.append(int(code))
+            value = data.get(bin_name)
+            if value is None:
+                binary.append(False)
+            else:
+                coder = self.binary_fts[bin_name]
+                code = coder.get(value)
+                if code is None:
+                    binary.append(False)
+                else:
+                    binary.append(int(code))
         bin = torch.tensor(binary).reshape(1, -1).float().to(self.device)
         codes = []
         for ft in self.categorical_fts:
             category = data[ft]
-            code = self.categorical_fts[ft]['cats'].index(category)
+            try:
+                code = self.categorical_fts[ft]['cats'].index(category)
+            except ValueError:
+                #case when cat is unknown or null
+                #gets index len(cats)
+                #e.g., cats [0, 1, 2] -> category 3 "_other"
+                code = len(self.categorical_fts[ft]['cats'])
             code = torch.tensor(code).to(self.device)
             codes.append(code)
         return num, bin, codes

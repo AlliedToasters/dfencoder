@@ -209,6 +209,20 @@ class AutoEncoderTest(TimedCase):
         assert (z_json == z).all()
         assert (z_json == z_dict).all()
 
+    def test_inference_missing_data(self):
+        record = df.sample()
+        record['salary'] = [None]
+        js = record.iloc[0].to_json()
+        with open('./_.json', 'w') as f:
+            f.write(json.dumps(js))
+        output = model._deserialize_json(js)
+        z_json = model.get_deep_stack_features_json(js)
+        dct = json.loads(js)
+        z_dict = model.get_deep_stack_features_json(dct)
+        z = model.get_deep_stack_features(record)
+        assert (z_json == z).all()
+        assert (z_json == z_dict).all()
+
     def test_get_representation(self):
         encoder = AutoEncoder()
         sample = df.sample(1025)
@@ -354,6 +368,27 @@ class NullIndicatorTest(TimedCase):
         output_df = ind2.transform(test_df)
         assert len(output_df.columns) == 4
         assert not output_df['has no null_was_nan'].any()
+
+        as_dict = ind.transform_dict(test_df.iloc[4].to_dict())
+        assert as_dict['has null_was_nan']
+
+        as_dict = ind.transform_dict(test_df.iloc[3].to_dict())
+        assert not as_dict['has null_was_nan']
+
+    def test_ghost_cols(self):
+        #wrote this test to debug a really weird issue
+        #went away after restarting ipynb kernel
+        #              ¯\_(ツ)_/¯
+        ind = NullIndicator()
+        test_df = pd.DataFrame(columns=['has null', 'has no null', 'some col i dont want'])
+        test_df['has null'] = np.random.randn(100)
+        test_df.loc[4, 'has null'] = np.nan
+        test_df['has no null'] = np.random.randn(100)
+        test_df['some col i dont want'] = np.random.randn(100)
+        test_df.loc[4, 'some col i dont want'] = np.nan
+        cols_i_want = ['has null', 'has no null']
+        ind.fit(test_df[cols_i_want])
+        assert 'some col i dont want' not in ind.fts
 
 if __name__ == '__main__':
     os.mkdir('_testlog')
