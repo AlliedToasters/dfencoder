@@ -851,12 +851,19 @@ class AutoEncoder(torch.nn.Module):
         z = torch.cat(result, dim=0)
         return z
 
-    def get_deep_stack_features(self, df):
+    def get_deep_stack_features(self, df, with_grad=False):
         """
         records and outputs all internal representations
         of input df as row-wise vectors.
         Output is 2-d array with len() == len(df)
         """
+        if with_grad:
+            return self._get_deep_stack_features(df)
+        else:
+            with torch.no_grad():
+                return self._get_deep_stack_features(df)
+
+    def _get_deep_stack_features(self, df):
         result = []
 
         n_batches = len(df)//self.eval_batch_size
@@ -867,21 +874,20 @@ class AutoEncoder(torch.nn.Module):
         if self.optim is None:
             self.build_model(df)
         df = self.prepare_df(df)
-        with torch.no_grad():
-            for i in range(n_batches):
-                this_batch = []
-                start = i * self.eval_batch_size
-                stop = (i+1) * self.eval_batch_size
-                num, bin, embeddings = self.encode_input(df.iloc[start:stop])
-                x = torch.cat(num + bin + embeddings, dim=1)
-                for layer in self.encoder:
-                    x = layer(x)
-                    this_batch.append(x)
-                for layer in self.decoder:
-                    x = layer(x)
-                    this_batch.append(x)
-                z = torch.cat(this_batch, dim=1)
-                result.append(z)
+        for i in range(n_batches):
+            this_batch = []
+            start = i * self.eval_batch_size
+            stop = (i+1) * self.eval_batch_size
+            num, bin, embeddings = self.encode_input(df.iloc[start:stop])
+            x = torch.cat(num + bin + embeddings, dim=1)
+            for layer in self.encoder:
+                x = layer(x)
+                this_batch.append(x)
+            for layer in self.decoder:
+                x = layer(x)
+                this_batch.append(x)
+            z = torch.cat(this_batch, dim=1)
+            result.append(z)
         result = torch.cat(result, dim=0)
         return result
 
@@ -928,10 +934,10 @@ class AutoEncoder(torch.nn.Module):
         bin = torch.tensor(binary).reshape(1, -1).float().to(self.device)
         codes = []
         for ft in self.categorical_fts:
-            category = data[ft]
             try:
+                category = data[ft]
                 code = self.categorical_fts[ft]['cats'].index(category)
-            except ValueError:
+            except (KeyError, ValueError):
                 #case when cat is unknown or null
                 #gets index len(cats)
                 #e.g., cats [0, 1, 2] -> category 3 "_other"
@@ -953,29 +959,35 @@ class AutoEncoder(torch.nn.Module):
             embeddings.append(emb)
         return [num], [bin], embeddings
 
-    def get_deep_stack_features_json(self, data):
+    def get_deep_stack_features_json(self, data, with_grad=False):
         """
         gets "deep stack" features for a single record;
         intended for executing "inference" logic for a
         network request.
         data can either be a json string or a dict.
         """
+        if with_grad:
+            return self._get_deep_stack_features_json(data)
+        else:
+            with torch.no_grad():
+                return self._get_deep_stack_features_json(data)
+
+    def _get_deep_stack_features_json(self, data):
         if isinstance(data, str):
             data = self._deserialize_json(data)
 
         self.eval()
 
-        with torch.no_grad():
-            this_batch = []
-            num, bin, embeddings = self.encode_input_dict(data)
-            x = torch.cat(num + bin + embeddings, dim=1)
-            for layer in self.encoder:
-                x = layer(x)
-                this_batch.append(x)
-            for layer in self.decoder:
-                x = layer(x)
-                this_batch.append(x)
-            z = torch.cat(this_batch, dim=1)
+        this_batch = []
+        num, bin, embeddings = self.encode_input_dict(data)
+        x = torch.cat(num + bin + embeddings, dim=1)
+        for layer in self.encoder:
+            x = layer(x)
+            this_batch.append(x)
+        for layer in self.decoder:
+            x = layer(x)
+            this_batch.append(x)
+        z = torch.cat(this_batch, dim=1)
         return z
 
     def get_anomaly_score(self, df):

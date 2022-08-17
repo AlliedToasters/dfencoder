@@ -23,10 +23,15 @@ Or, you can get the latest version by cloning this repository and installing fro
 pip install .
 ```
 <br><br>
+
 # Usage
 Thorough documntation is still being written, but the [demo notebook](demo_data/demo.ipynb) is available to show some of the features of this library.
 # Running the tests
-The `adult.csv` dataset is used in the testing script. Make sure the file (found in the root of this repo) is in the same directory as `test.py` when you run the script.
+The `adult.csv` dataset is used in the testing script. Make sure the file (found in the root of this repo) is in the same directory as `test.py` when you run the script. Install and run:
+```
+python test.py
+```
+
 # Contributing
 Contributors are welcomed! Please reach out with PRs.
 # Feature Requests and Bugs
@@ -42,7 +47,8 @@ feed-forward MLP. This HLD hopefully clears up how this looks.
 This library is a personal project so progress is slow. The latest release as of this writing is `v0.0.38` which fixes an issue handling null records in timestamp columns.
 
 ## Previous Releases:
-`v0.0.37` which introduces "inference mode"
+`v0.0.42` developing features for "inference mode"
 that optimizes inference for single records, on json inputs. <br><br>
 
+### Notes
 Pre-process your timestamp columns by using pandas: `pd.to_datetime()` so `dfencoder` can infer the datatype and handle it accordingly. 
