@@ -159,7 +159,7 @@ class AutoEncoderTest(TimedCase):
 
     def test_forward(self):
         encoder, sample = self.test_encode_input()
-        num, bin, cat = encoder.forward(sample)
+        num, bin, cat, cls = encoder.forward(sample)
         #raise Exception(num.shape)
         if 'mytime' in encoder.cyclical_fts:
             assert num.shape == (32, 15)
@@ -171,7 +171,7 @@ class AutoEncoderTest(TimedCase):
 
     def test_compute_loss(self):
         encoder, num, bin, cat, sample = self.test_forward()
-        mse_loss, bce_loss, cce_loss, net_loss = encoder.compute_loss(num, bin, cat, sample)
+        mse_loss, bce_loss, cce_loss, cls_loss, net_loss = encoder.compute_loss(num, bin, cat, sample)
 
     def test_fit(self):
         encoder = AutoEncoder(
@@ -196,6 +196,34 @@ class AutoEncoderTest(TimedCase):
         data = encoder.df_predict(sample)
         assert (data.columns == sample.columns).all()
         assert data.shape == sample.shape
+        return encoder
+
+    def test_fit_with_label(self):
+        encoder = AutoEncoder(
+            verbose=False,
+            optimizer='sgd',
+            lr=.01,
+            lr_decay=.95,
+            progress_bar=False,
+            scaler={'age':'standard'},
+            label_col='salary'
+        )
+        df_cls['salary'] = np.where(np.random.rand(len(df_cls)) > 0.5, np.nan, df_cls['salary'])
+        df_cls['salary'] = np.where(df_cls['salary'] == "<50k", 0, df_cls['salary'])
+        df_cls['salary'] = np.where(df_cls['salary'] == ">=50k", 1, df_cls['salary'])
+        sample = df_cls.sample(511)
+        encoder.fit(sample, epochs=2)
+        assert isinstance(encoder.numeric_fts['age']['scaler'], StandardScaler)
+        assert isinstance(encoder.numeric_fts['fnlwgt']['scaler'], GaussRankScaler)
+        assert encoder.lr_decay.get_lr()[0] < .01
+        anomaly_score = encoder.get_anomaly_score(sample)
+        assert anomaly_score.shape == (511,)
+        encoder.fit(sample, epochs=2)
+        data = encoder.df_predict(sample)
+        expected_cols = set(list(sample.columns))
+        expected_cols.remove('salary')
+        got_cols = set(list(data.columns))
+        assert (expected_cols == got_cols)
         return encoder
 
     def test_inference(self):
@@ -393,6 +421,7 @@ class NullIndicatorTest(TimedCase):
 if __name__ == '__main__':
     os.mkdir('_testlog')
     df = pd.read_csv('adult.csv')
+    df_cls = pd.read_csv('adult.csv')
     b = ModelBuilder()
     model, _ = b.build_model()
     unittest.main(exit=False)

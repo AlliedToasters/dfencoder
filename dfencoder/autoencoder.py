@@ -1,4 +1,5 @@
 from collections import OrderedDict
+from copy import deepcopy
 import gc
 
 import pandas as pd
@@ -149,6 +150,12 @@ class AutoEncoder(torch.nn.Module):
             decoder_dropout=None,
             encoder_activations=None,
             decoder_activations=None,
+            label_col=None,
+            classifier_layers=[128,],
+            categorical_weight = 1.0,
+            binary_weight = 1.0,
+            numeric_weight = 1.0,
+            classifier_weight = 1.0,
             activation='relu',
             min_cats=10,
             swap_p=.15,
@@ -180,6 +187,8 @@ class AutoEncoder(torch.nn.Module):
         self.binary_fts = OrderedDict()
         self.categorical_fts = OrderedDict()
         self.cyclical_fts = OrderedDict()
+        self.label_col = label_col
+        self.cls_layers_shape = classifier_layers
         self.encoder_layers = encoder_layers
         self.decoder_layers = decoder_layers
         self.encoder_activations = encoder_activations
@@ -189,6 +198,11 @@ class AutoEncoder(torch.nn.Module):
         self.min_cats = min_cats
         self.encoder = []
         self.decoder = []
+        self.cls_layers = []
+        self.cls_weight = classifier_weight
+        self.cat_weight = categorical_weight
+        self.num_weight = numeric_weight
+        self.bin_weight = binary_weight
         self.train_mode = self.train
 
         self.swap_p = swap_p
@@ -302,6 +316,9 @@ class AutoEncoder(torch.nn.Module):
     def init_binary(self, df):
         dt = df.dtypes
         binaries = list(dt[dt==bool].index)
+        if self.label_col is not None:
+            binaries.remove(self.label_col)
+            binaries.remove(self.label_col + "__was_na")
         for ft in self.binary_fts:
             feature = self.binary_fts[ft]
             for i, cat in enumerate(feature['cats']):
@@ -315,6 +332,7 @@ class AutoEncoder(torch.nn.Module):
             self.binary_fts[ft] = feature
 
         self.bin_names = list(self.binary_fts.keys())
+
 
     def init_cyclical(self, df):
         dt = df.dtypes
@@ -332,10 +350,20 @@ class AutoEncoder(torch.nn.Module):
                 ]
 
     def init_features(self, df):
+        if self.label_col is not None:
+            df = self.coerce_label_col(df)
         self.init_cyclical(df)
         self.init_numeric(df)
         self.init_cats(df)
         self.init_binary(df)
+
+    def coerce_label_col(self, df):
+        df = deepcopy(df)
+        df[self.label_col + "__was_na"] = df[self.label_col].isna()
+        df[self.label_col] = df[self.label_col].astype(bool)
+        assert df[(~df[self.label_col + "__was_na"])][self.label_col].sum() > 0, "no positive labels in dataset."
+        assert (~df[(~df[self.label_col + "__was_na"])][self.label_col]).sum() > 0, "no negative labels in dataset."
+        return df
 
     def build_inputs(self):
         #will compute total number of inputs
@@ -536,6 +564,24 @@ class AutoEncoder(torch.nn.Module):
         #returns a copy of preprocessed dataframe.
         self.to(self.device)
 
+        if self.label_col is not None:
+            #build classifier
+            inp_dim = self.get_deep_stack_features(df.sample(2)).shape[1]
+            layer = CompleteLayer(inp_dim, self.cls_layers_shape[0])
+            self.cls_layers.append(layer)
+            self.add_module(f'cls_0', layer)
+            prev_shape = self.cls_layers_shape[0]
+            ticker = 0
+            for layer_shape in self.cls_layers_shape[1:]:
+                ticker += 1
+                layer = CompleteLayer(prev_shape, layer_shape)
+                prev_shape = layer_shape
+                self.cls_layers.append(layer)
+                self.add_module(f'cls_{ticker}', layer)
+            output_layer = CompleteLayer(prev_shape, 1, activation='sigmoid')
+            self.cls_layers.append(output_layer)
+            self.add_module('cls_output', output_layer)
+
         if self.verbose:
             print('done!')
 
@@ -574,33 +620,55 @@ class AutoEncoder(torch.nn.Module):
         return num, bin, cat
 
     def encode(self, x, layers=None):
+        #this tracks all internal representations.
+        repr = []
         if layers is None:
             layers = len(self.encoder)
         for i in range(layers):
             layer = self.encoder[i]
             x = layer(x)
-        return x
+            repr.append(x)
+        
+        return x, repr
 
     def decode(self, x, layers=None):
+        repr = []
         if layers is None:
             layers = len(self.decoder)
         for i in range(layers):
             layer = self.decoder[i]
             x = layer(x)
+            repr.append(x)
         num, bin, cat = self.compute_outputs(x)
-        return num, bin, cat
+        return num, bin, cat, repr
+
+    def cls_forward(self, repr):
+        x = torch.cat(repr, dim=1)
+        for layer in self.cls_layers:
+            x = layer(x)
+        return x
 
     def forward(self, df):
         """We do the thang. Takes pandas dataframe as input."""
         num, bin, embeddings = self.encode_input(df)
         x = torch.cat(num + bin + embeddings, dim=1)
 
-        encoding = self.encode(x)
-        num, bin, cat = self.decode(encoding)
+        encoding, repr = self.encode(x)
+        num, bin, cat, repr2 = self.decode(encoding)
+        if self.label_col is not None:
+            repr = repr + repr2
+            cls = self.cls_forward(repr)
+        else:
+            cls = None
 
-        return num, bin, cat
+        return num, bin, cat, cls
 
-    def compute_loss(self, num, bin, cat, target_df, logging=True, _id=False):
+    def compute_cls_targets(self, df):
+        cls = torch.tensor(df[self.label_col].astype(int).values).float().to(self.device)
+        mask = (1 - torch.tensor(df[self.label_col + "__was_na"].astype(int).values).float().to(self.device)) * -1
+        return cls, mask
+
+    def compute_loss(self, num, bin, cat, target_df, cls=None, logging=True, _id=False):
         if logging:
             if self.logger is not None:
                 logging = True
@@ -621,6 +689,15 @@ class AutoEncoder(torch.nn.Module):
             cce_loss.append(loss)
             val = loss.cpu().item()
             net_loss += [val]
+        #compute classification loss ifyamust
+        if cls is not None:
+            cls_target, mask = self.compute_cls_targets(target_df)
+            cls_loss = self.bce(cls, cls_target)
+            cls_loss = cls_loss * mask
+            net_loss += list(cls_loss.mean(dim=0).cpu().detach().numpy())
+            cls_loss = cls_loss.mean()
+        else:
+            cls_loss = None
         if logging:
             if self.training:
                 self.logger.training_step(net_loss)
@@ -630,10 +707,12 @@ class AutoEncoder(torch.nn.Module):
                 self.logger.val_step(net_loss)
 
         net_loss = np.array(net_loss).mean()
-        return mse_loss, bce_loss, cce_loss, net_loss
+        return mse_loss, bce_loss, cce_loss, cls_loss, net_loss
 
-    def do_backward(self, mse, bce, cce):
+    def do_backward(self, mse, bce, cce, cls=None):
 
+        if cls is not None:
+            cls.backward(retain_graph=True)
         mse.backward(retain_graph=True)
         bce.backward(retain_graph=True)
         for i, ls in enumerate(cce):
@@ -665,7 +744,7 @@ class AutoEncoder(torch.nn.Module):
             dim = len(feature['cats']) + 1
             pred = ohe(cd, dim, device=self.device) * 5
             codes_pred.append(pred)
-        mse_loss, bce_loss, cce_loss, net_loss = self.compute_loss(
+        mse_loss, bce_loss, cce_loss, cls_loss, net_loss = self.compute_loss(
             num_pred,
             bin_pred,
             codes_pred,
@@ -727,13 +806,13 @@ class AutoEncoder(torch.nn.Module):
                         slc_in = val_in.iloc[start:stop]
                         slc_out = val_df.iloc[start:stop]
 
-                        num, bin, cat = self.forward(slc_in)
-                        _, _, _, net_loss = self.compute_loss(num, bin, cat, slc_out)
+                        num, bin, cat, cls = self.forward(slc_in)
+                        _, _, _, _, net_loss = self.compute_loss(num, bin, cat, slc_out)
                         swapped_loss.append(net_loss)
 
 
-                        num, bin, cat = self.forward(slc_out)
-                        _, _, _, net_loss = self.compute_loss(num, bin, cat, slc_out, _id=True)
+                        num, bin, cat, cls = self.forward(slc_out)
+                        _, _, _, _, net_loss = self.compute_loss(num, bin, cat, slc_out, _id=True)
                         id_loss.append(net_loss)
 
                     self.logger.end_epoch()
@@ -767,12 +846,17 @@ class AutoEncoder(torch.nn.Module):
             stop = (j+1) * self.batch_size
             in_sample = input_df.iloc[start:stop]
             target_sample = df.iloc[start:stop]
-            num, bin, cat = self.forward(in_sample)
-            mse, bce, cce, net_loss = self.compute_loss(
+            num, bin, cat, cls = self.forward(in_sample)
+            mse, bce, cce, cls, net_loss = self.compute_loss(
                 num, bin, cat, target_sample,
                 logging=True
             )
-            self.do_backward(mse, bce, cce)
+            mse = mse * self.num_weight
+            bce = bce * self.bin_weight
+            cce = [x * self.cat_weight for x in cce]
+            if cls is not None:
+                cls = cls * self.cls_weight
+            self.do_backward(mse, bce, cce, cls)
             self.optim.step()
             self.optim.zero_grad()
 
@@ -843,10 +927,10 @@ class AutoEncoder(torch.nn.Module):
                 x = torch.cat(num + bin + embeddings, dim=1)
                 if layer <= 0:
                     layers = len(self.encoder) + layer
-                    x = self.encode(x, layers=layers)
+                    x, repr = self.encode(x, layers=layers)
                 else:
-                    x = self.encode(x)
-                    x = self.decode(x, layers=layer)
+                    x, repr = self.encode(x)
+                    x, repr = self.decode(x, layers=layer)
                 result.append(x)
         z = torch.cat(result, dim=0)
         return z
@@ -999,7 +1083,7 @@ class AutoEncoder(torch.nn.Module):
         data = self.prepare_df(df)
         num_target, bin_target, codes = self.compute_targets(data)
         with torch.no_grad():
-            num, bin, cat = self.forward(data)
+            num, bin, cat, _ = self.forward(data)
 
 
         mse_loss = self.mse(num, num_target)
@@ -1027,7 +1111,7 @@ class AutoEncoder(torch.nn.Module):
             cols += [x for x in self.cyclical_fts.keys()]
             df = pd.DataFrame(index=range(len(x)), columns=cols)
 
-        num, bin, cat = self.decode(x)
+        num, bin, cat, repr = self.decode(x)
 
         num_cols = [x for x in self.numeric_fts.keys()]
         num_df = pd.DataFrame(data=num[:, :len(num_cols)].cpu().numpy(), index=df.index)
@@ -1075,7 +1159,10 @@ class AutoEncoder(torch.nn.Module):
         #concat
         output_df = pd.concat([num_df, bin_df, cat_df, cyc_df], axis=1)
 
-        return output_df[df.columns]
+        output_cols = list(df.columns)
+        if self.label_col is not None:
+            output_cols.remove(self.label_col)
+        return output_df[output_cols]
 
     def df_predict(self, df):
         """
@@ -1089,7 +1176,7 @@ class AutoEncoder(torch.nn.Module):
         with torch.no_grad():
             num, bin, embeddings = self.encode_input(data)
             x = torch.cat(num + bin + embeddings, dim=1)
-            x = self.encode(x)
+            x, repr = self.encode(x)
             output_df = self.decode_to_df(x, df=df)
 
         return output_df
