@@ -47,6 +47,7 @@ feed-forward MLP. This HLD hopefully clears up how this looks.
 This library is a personal project so progress is slow. The latest release as of this writing is `v0.0.38` which fixes an issue handling null records in timestamp columns.
 
 ## Previous Releases:
+`v0.0.43` adding support for a partially supervised classifier. This release, just like all the others, is unstable (this one in particular is probably break-y because it adds a whole new feature - if you have new issues, roll back to `0.0.42`). <br><br>
 `v0.0.42` developing features for "inference mode"
 that optimizes inference for single records, on json inputs. <br><br>
 

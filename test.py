@@ -208,10 +208,10 @@ class AutoEncoderTest(TimedCase):
             scaler={'age':'standard'},
             label_col='salary'
         )
-        df['mytime'] = 1539435837534561201
-        df['mytime'] = pd.to_datetime(df['mytime'])
-        df['mytime'] = pd.to_datetime(np.where(np.random.random(df.shape[0]) > .9, None, df['mytime']))
-        sample = df.sample(511)
+        df_cls['salary'] = np.where(np.random.rand(len(df_cls)) > 0.5, np.nan, df_cls['salary'])
+        df_cls['salary'] = np.where(df_cls['salary'] == "<50k", 0, df_cls['salary'])
+        df_cls['salary'] = np.where(df_cls['salary'] == ">=50k", 1, df_cls['salary'])
+        sample = df_cls.sample(511)
         encoder.fit(sample, epochs=2)
         assert isinstance(encoder.numeric_fts['age']['scaler'], StandardScaler)
         assert isinstance(encoder.numeric_fts['fnlwgt']['scaler'], GaussRankScaler)
@@ -220,8 +220,10 @@ class AutoEncoderTest(TimedCase):
         assert anomaly_score.shape == (511,)
         encoder.fit(sample, epochs=2)
         data = encoder.df_predict(sample)
-        assert (data.columns == sample.columns).all()
-        assert data.shape == sample.shape
+        expected_cols = set(list(sample.columns))
+        expected_cols.remove('salary')
+        got_cols = set(list(data.columns))
+        assert (expected_cols == got_cols)
         return encoder
 
     def test_inference(self):
@@ -419,6 +421,7 @@ class NullIndicatorTest(TimedCase):
 if __name__ == '__main__':
     os.mkdir('_testlog')
     df = pd.read_csv('adult.csv')
+    df_cls = pd.read_csv('adult.csv')
     b = ModelBuilder()
     model, _ = b.build_model()
     unittest.main(exit=False)
