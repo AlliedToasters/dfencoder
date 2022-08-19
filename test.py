@@ -159,7 +159,7 @@ class AutoEncoderTest(TimedCase):
 
     def test_forward(self):
         encoder, sample = self.test_encode_input()
-        num, bin, cat = encoder.forward(sample)
+        num, bin, cat, cls = encoder.forward(sample)
         #raise Exception(num.shape)
         if 'mytime' in encoder.cyclical_fts:
             assert num.shape == (32, 15)
@@ -171,7 +171,7 @@ class AutoEncoderTest(TimedCase):
 
     def test_compute_loss(self):
         encoder, num, bin, cat, sample = self.test_forward()
-        mse_loss, bce_loss, cce_loss, net_loss = encoder.compute_loss(num, bin, cat, sample)
+        mse_loss, bce_loss, cce_loss, cls_loss, net_loss = encoder.compute_loss(num, bin, cat, sample)
 
     def test_fit(self):
         encoder = AutoEncoder(
@@ -181,6 +181,32 @@ class AutoEncoderTest(TimedCase):
             lr_decay=.95,
             progress_bar=False,
             scaler={'age':'standard'},
+        )
+        df['mytime'] = 1539435837534561201
+        df['mytime'] = pd.to_datetime(df['mytime'])
+        df['mytime'] = pd.to_datetime(np.where(np.random.random(df.shape[0]) > .9, None, df['mytime']))
+        sample = df.sample(511)
+        encoder.fit(sample, epochs=2)
+        assert isinstance(encoder.numeric_fts['age']['scaler'], StandardScaler)
+        assert isinstance(encoder.numeric_fts['fnlwgt']['scaler'], GaussRankScaler)
+        assert encoder.lr_decay.get_lr()[0] < .01
+        anomaly_score = encoder.get_anomaly_score(sample)
+        assert anomaly_score.shape == (511,)
+        encoder.fit(sample, epochs=2)
+        data = encoder.df_predict(sample)
+        assert (data.columns == sample.columns).all()
+        assert data.shape == sample.shape
+        return encoder
+
+    def test_fit_with_label(self):
+        encoder = AutoEncoder(
+            verbose=False,
+            optimizer='sgd',
+            lr=.01,
+            lr_decay=.95,
+            progress_bar=False,
+            scaler={'age':'standard'},
+            label_col='salary'
         )
         df['mytime'] = 1539435837534561201
         df['mytime'] = pd.to_datetime(df['mytime'])
