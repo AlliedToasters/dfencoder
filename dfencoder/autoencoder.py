@@ -460,6 +460,10 @@ class AutoEncoder(torch.nn.Module):
             col = col.fillna('_other')
             output_df[ft] = col
 
+        if self.label_col is not None:
+            output_df[self.label_col + "__was_na"] = df[self.label_col].isna()
+            output_df[self.label_col] = df[self.label_col].fillna(0)
+
         return output_df
 
     def build_optimizer(self):
@@ -665,7 +669,10 @@ class AutoEncoder(torch.nn.Module):
 
     def compute_cls_targets(self, df):
         cls = torch.tensor(df[self.label_col].astype(int).values).float().to(self.device)
-        mask = (1 - torch.tensor(df[self.label_col + "__was_na"].astype(int).values).float().to(self.device)) * -1
+        mask = df[self.label_col + "__was_na"].astype(int).values
+        mask = np.where(mask, 0, 1)
+        mask = torch.tensor(mask).float().to(self.device)
+        #mask = (1 - torch.tensor(df[self.label_col + "__was_na"].astype(int).values).float().to(self.device)) * -1
         return cls, mask
 
     def compute_loss(self, num, bin, cat, target_df, cls=None, logging=True, _id=False):
@@ -692,19 +699,19 @@ class AutoEncoder(torch.nn.Module):
         #compute classification loss ifyamust
         if cls is not None:
             cls_target, mask = self.compute_cls_targets(target_df)
-            cls_loss = self.bce(cls, cls_target)
+            cls_loss = self.bce(cls.flatten(), cls_target)
             cls_loss = cls_loss * mask
-            net_loss += list(cls_loss.mean(dim=0).cpu().detach().numpy())
+            #net_loss += cls_loss.mean(dim=0).cpu().detach().numpy())
             cls_loss = cls_loss.mean()
         else:
             cls_loss = None
         if logging:
             if self.training:
-                self.logger.training_step(net_loss)
+                self.logger.training_step(net_loss, classifier_loss=cls_loss)
             elif _id:
-                self.logger.id_val_step(net_loss)
+                self.logger.id_val_step(net_loss, classifier_loss=cls_loss)
             elif not self.training:
-                self.logger.val_step(net_loss)
+                self.logger.val_step(net_loss, classifier_loss=cls_loss)
 
         net_loss = np.array(net_loss).mean()
         return mse_loss, bce_loss, cce_loss, cls_loss, net_loss
@@ -807,12 +814,12 @@ class AutoEncoder(torch.nn.Module):
                         slc_out = val_df.iloc[start:stop]
 
                         num, bin, cat, cls = self.forward(slc_in)
-                        _, _, _, _, net_loss = self.compute_loss(num, bin, cat, slc_out)
+                        _, _, _, _, net_loss = self.compute_loss(num, bin, cat, slc_out, cls=cls)
                         swapped_loss.append(net_loss)
 
 
                         num, bin, cat, cls = self.forward(slc_out)
-                        _, _, _, _, net_loss = self.compute_loss(num, bin, cat, slc_out, _id=True)
+                        _, _, _, _, net_loss = self.compute_loss(num, bin, cat, slc_out, cls=cls, _id=True)
                         id_loss.append(net_loss)
 
                     self.logger.end_epoch()
@@ -848,7 +855,7 @@ class AutoEncoder(torch.nn.Module):
             target_sample = df.iloc[start:stop]
             num, bin, cat, cls = self.forward(in_sample)
             mse, bce, cce, cls, net_loss = self.compute_loss(
-                num, bin, cat, target_sample,
+                num, bin, cat, target_sample, cls=cls,
                 logging=True
             )
             mse = mse * self.num_weight

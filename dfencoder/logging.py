@@ -17,20 +17,29 @@ class BasicLogger(object):
             self.train_fts[ft] = [[], []]
             self.val_fts[ft] = [[], []]
             self.id_val_fts[ft] = [[], []]
+        self.classifier_train = [[], []]
+        self.classifier_val = [[], []]
+        self.classifier_id = [[], []]
         self.n_epochs = 0
         self.baseline_loss = baseline_loss
 
-    def training_step(self, losses):
+    def training_step(self, losses, classifier_loss=None):
         for i, ft in enumerate(self.fts):
             self.train_fts[ft][0].append(losses[i])
+        if classifier_loss is not None:
+            self.classifier_train[0].append(classifier_loss)
 
-    def val_step(self, losses):
+    def val_step(self, losses, classifier_loss=None):
         for i, ft in enumerate(self.fts):
             self.val_fts[ft][0].append(losses[i])
+        if classifier_loss is not None:
+            self.classifier_val[0].append(classifier_loss)
 
-    def id_val_step(self, losses):
+    def id_val_step(self, losses, classifier_loss=None):
         for i, ft in enumerate(self.fts):
             self.id_val_fts[ft][0].append(losses[i])
+        if classifier_loss is not None:
+            self.classifier_id[0].append(classifier_loss)
 
     def end_epoch(self):
         self.n_epochs += 1
@@ -49,6 +58,21 @@ class BasicLogger(object):
                 self.id_val_fts[ft][1].append(mean)
                 #reset id_val_fts log
                 self.id_val_fts[ft][0] = []
+        if len(self.classifier_train[0]) > 0:
+            mean = np.array(self.classifier_train[0]).mean()
+            self.classifier_train[1].append(mean)
+            #reset classifier log
+            self.classifier_train[0] = []
+        if len(self.classifier_val[0]) > 0:
+            mean = np.array(self.classifier_val[0]).mean()
+            self.classifier_val[1].append(mean)
+            #reset classifier log
+            self.classifier_val[0] = []
+        if len(self.classifier_id[0]) > 0:
+            mean = np.array(self.classifier_id[0]).mean()
+            self.classifier_id[1].append(mean)
+            #reset classifier log
+            self.classifier_id[0] = []
     
     def show_embeddings(self, categories):
         pass
@@ -74,25 +98,43 @@ class IpynbLogger(BasicLogger):
         train_loss = [self.train_fts[ft][1] for ft in self.fts]
         train_loss = np.array(train_loss).mean(axis=0)
         self.plt.plot(x, train_loss, label='train loss', color='orange')
+        if len(self.classifier_train[1]) == 0:
+            if len(self.val_fts[self.fts[0]]) > 0:
+                self.plt.axhline(
+                    y=self.baseline_loss,
+                    linestyle='dotted',
+                    label='baseline val loss',
+                    color='blue'
+                )
+                val_loss = [self.val_fts[ft][1] for ft in self.fts]
+                val_loss = np.array(val_loss).mean(axis=0)
+                self.plt.plot(x, val_loss, label='val loss', color='blue')
 
-        if len(self.val_fts[self.fts[0]]) > 0:
-            self.plt.axhline(
-                y=self.baseline_loss,
-                linestyle='dotted',
-                label='baseline val loss',
-                color='blue'
-            )
-            val_loss = [self.val_fts[ft][1] for ft in self.fts]
-            val_loss = np.array(val_loss).mean(axis=0)
-            self.plt.plot(x, val_loss, label='val loss', color='blue')
+            if len(self.id_val_fts[self.fts[0]]) > 0:
+                id_val_loss = [self.id_val_fts[ft][1] for ft in self.fts]
+                id_val_loss = np.array(id_val_loss).mean(axis=0)
+                self.plt.plot(x, id_val_loss, label='identity val loss', color='pink')
 
-        if len(self.id_val_fts[self.fts[0]]) > 0:
-            id_val_loss = [self.id_val_fts[ft][1] for ft in self.fts]
-            id_val_loss = np.array(id_val_loss).mean(axis=0)
-            self.plt.plot(x, id_val_loss, label='identity val loss', color='pink')
+            to_max = [max(id_val_loss), max(val_loss), max(train_loss), self.baseline_loss]
+        else:
+            to_max = []
+            if len(self.classifier_train[1]) > 0:
+                train_loss = np.array(self.classifier_train[1])
+                self.plt.plot(x, train_loss, label='cls train loss', color='green')
+                to_max.append(train_loss.max())
+
+            if len(self.classifier_val[1]) > 0:
+                val_loss = np.array(self.classifier_val[1])
+                self.plt.plot(x, val_loss, label='cls val loss', color='purple')
+                to_max.append(val_loss.max())
+
+            if len(self.classifier_id[1]) > 0:
+                id_loss = np.array(self.classifier_id[1])
+                self.plt.plot(x, id_loss, label='cls val id loss', color='palevioletred')
+                to_max.append(id_loss.max())
 
         #adjust ylim to display all data
-        max_y = max(max(id_val_loss), max(val_loss), max(train_loss), self.baseline_loss)
+        max_y = max(to_max)
         self.plt.ylim(0, max_y+.2)
         self.plt.legend()
         self.plt.xlabel('epochs')
